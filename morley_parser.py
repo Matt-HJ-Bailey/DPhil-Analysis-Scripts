@@ -12,7 +12,12 @@ from typing import Dict, Tuple
 import networkx as nx
 import numpy as np
 
-from rings import PeriodicRingFinder
+try:
+    from rings import PeriodicRingFinder
+    RING_FINDER_ENABLED = True
+except ImportError as RING_FINDER_EX:
+    RING_FINDER_ENABLED = False
+    
 from draw_and_colour import colour_graph
 
 import sys
@@ -68,14 +73,14 @@ def load_morley(
         box_max_x, box_max_y = [float(item) for item in fi.readline().split()]
         inv_box_max_x, inv_box_max_y = [float(item) for item in fi.readline().split()]
 
-        if not np.isclose(box_max_x, 1.0 / inv_box_max_x, 1e-5):
+        if not np.isclose(box_max_x, 1.0 / inv_box_max_x, 1e-4):
             raise RuntimeError(
-                "Inverse periodic box side does not match periodic box size."
+                f"Inverse periodic box side does not match periodic box size in x. Got {box_max_x}, {1.0 / inv_box_max_x}."
             )
 
-        if not np.isclose(box_max_y, 1.0 / inv_box_max_y, 1e-5):
+        if not np.isclose(box_max_y, 1.0 / inv_box_max_y, 1e-4):
             raise RuntimeError(
-                "Inverse periodic box side does not match periodic box size."
+                f"Inverse periodic box side does not match periodic box size in y. Got {box_max_y}, {1.0 / inv_box_max_y}."
             )
         periodic_box = np.array([[0.0, box_max_x], [0.0, box_max_y]], dtype=float)
 
@@ -91,6 +96,17 @@ def load_morley(
 def construct_morley_dual(
     graph: nx.Graph, pos: Dict[int, np.array], periodic_box: np.array
 ):
+    """
+    Construct the dual graph of this Morley graph.
+    The dual graph connects centres of all polygons.
+    
+    Doesn't work if the PeriodicRingFinder couldn't be imported
+    """
+    
+    # Bail out if we can't find the RingFinder.
+    if not RING_FINDER_ENABLED:
+        raise RING_FINDER_EX
+        
     ring_finder = PeriodicRingFinder(graph, pos, periodic_box[:, 1])
 
     num_nodes = len(graph)
