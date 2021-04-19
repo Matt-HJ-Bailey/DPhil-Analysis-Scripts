@@ -10,15 +10,15 @@ import sys
 import os
 import glob
 import numpy as np
+import matplotlib.pyplot as plt
 
 from morley_parser import load_morley
 from graph_to_molecules import graph_to_molecules
 
 
-def morley_to_lammps(morley_prefix, lammps_name, desired_box =None):
+def morley_to_lammps(morley_prefix:str, lammps_name:str, desired_box =None):
     pos_dict, graph, periodic_box = load_morley(morley_prefix)
-    curves = graph_to_molecules(graph=graph, pos=pos_dict, periodic_box=periodic_box)
-    curves.rescale(300)
+    
     if desired_box is not None:
         current_x_len = periodic_box[0, 1] -  periodic_box[0, 0]
         current_y_len = periodic_box[1, 1] -  periodic_box[1, 0]
@@ -27,14 +27,21 @@ def morley_to_lammps(morley_prefix, lammps_name, desired_box =None):
         desired_y_len = desired_box[1, 1] -  desired_box[1, 0]
         
         matrix = np.array([[desired_x_len / current_x_len, 0.0],
-                           [0.0, desired_y_len / current_y_len]])
-        curves.apply_transformation_matrix(matrix)
-        periodic_box = desired_box
-        
+                           [0.0, desired_y_len / current_y_len]])    
+        print(matrix, current_x_len, desired_x_len)          
+        for key, pos in pos_dict.items():
+            pos_dict[key] = matrix @ pos
+        periodic_box[:, 1] = matrix @ periodic_box[:, 1]
+           
+    curves = graph_to_molecules(graph=graph, pos=pos_dict, periodic_box=periodic_box)
+    curves.rescale(300)
     periodic_box *= 300
     print(f"Writing to {lammps_name}")
     curves.to_lammps(lammps_name, periodic_box=periodic_box, mass=0.5 / 6)
-
+    fig, ax = plt.subplots()
+    curves.plot_onto(ax)
+    ax.axis("equal")
+    plt.show()
 
 def find_morley_prefixes(in_directory: str="./"):
     """
@@ -83,10 +90,11 @@ def find_morley_timesteps(in_directory: str="./"):
 
 def main():
     for morley_prefix in find_morley_timesteps():
+        #morley_prefix = "STRETCH_NETMC_-2.0_25_A"
         morley_to_lammps(morley_prefix,
                          os.path.basename(morley_prefix) + ".data",
-                         desired_box=np.array([[0.0, 20.784610],
-                                               [0.0, 18.000000]]))
+                         desired_box=np.array([[0.0, 18.0*2.0/np.sqrt(3)],
+                                               [0.0, 18.0]]))
 
 if __name__ == "__main__":
     main()
