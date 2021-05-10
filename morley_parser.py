@@ -14,10 +14,11 @@ import numpy as np
 
 try:
     from rings import PeriodicRingFinder
+
     RING_FINDER_ENABLED = True
 except ImportError as RING_FINDER_EX:
     RING_FINDER_ENABLED = False
-    
+
 from draw_and_colour import colour_graph
 
 import sys
@@ -102,11 +103,11 @@ def construct_morley_dual(
     
     Doesn't work if the PeriodicRingFinder couldn't be imported
     """
-    
+
     # Bail out if we can't find the RingFinder.
     if not RING_FINDER_ENABLED:
         raise RING_FINDER_EX
-        
+
     ring_finder = PeriodicRingFinder(graph, pos, periodic_box[:, 1])
 
     num_nodes = len(graph)
