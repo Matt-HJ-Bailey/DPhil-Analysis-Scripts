@@ -21,10 +21,10 @@ class NodeME:
 
     def __init__(self, k_limits: Tuple[int] = (3, 20), k_mean: float = 6.0):
         """
-        Initialise with limits on node degrees and mean degree. 
+        Initialise with limits on node degrees and mean degree.
         Larger node degrees only contribute significantly at low p6.
         Poisson Voronoi distribution expected to have 3<=k<=16.
-        
+
         :param k_limits: lower and upper limit of node degrees.
         :param k_mean: mean node degree
         """
@@ -50,9 +50,9 @@ class NodeME:
     def __call__(self, target_pk: float, k: int = 6) -> Optional[np.array]:
         """
         Optimise Lagrange multipliers to target a specific pk value, returning ME distribution.
-        
+
         :param target_pk: target value of pk
-        :param k: k value of pk 
+        :param k: k value of pk
         :return: numpy array of maximum entropy distribution
         """
 
@@ -68,7 +68,7 @@ class NodeME:
     def scan(self, pnts: int = 1000, y_range: Tuple[float] = (2000, 0)):
         """
         Calculate maximum entropy distribution at given number of points.
-        
+
         :param pnts: number of points to calculate maximum entropy
         :param y_range: optional parameter specifying range for second Lagrange multiplier, default selected for <k>=6
         """
@@ -87,7 +87,7 @@ class NodeME:
     def get_pk(self, k: Optional[int] = None) -> np.array:
         """
         Get all node distributions, for single k value or range of k values.
-        
+
         :param k: k values to include in pk, if None then includes all k
         :type k: None, int or list of ints
         :return: numpy array of (pnts,pk)
@@ -101,7 +101,7 @@ class NodeME:
     def get_variance(self) -> np.array:
         """
         Get variance of node distributions.
-        
+
         :return: numpy array of (pnts,var)
         """
 
@@ -110,7 +110,7 @@ class NodeME:
     def get_entropy(self) -> np.array:
         """
         Get entropy of node distributions.
-        
+
         :return: numpy array of (pnts,entropy)
         """
 
@@ -119,7 +119,7 @@ class NodeME:
     def plot_pk_variance(self, k: int = 6):
         """
         Plot results of maximum entropy calculation, pk vs variance (Lemaitre's law).
-        
+
         :param k: pk to plot against variance
         :type k: int
         """
@@ -152,7 +152,7 @@ class NodeME:
     def write(self, filename: str = "./node_dist.dat"):
         """
         Write results of p_k and variance to file given by filename
-        
+
         :param filename: the file to write to
         """
 
@@ -166,13 +166,13 @@ class NodeME:
 def target_obj(y: float, net: NodeME, target_pk: float, target_k: int) -> np.array:
     """
     Objective function to optimise Lagrange multipliers to give target p_k.
-    
-    :param y: Lagrange multiplier 
+
+    :param y: Lagrange multiplier
     :param net: network object
     :type net: NodeME object
     :param target_pk: target value of pk
     :param target_k: k for target value of pk
-    :return: 
+    :return:
     """
 
     # Find maximum entropy solution
@@ -187,11 +187,11 @@ def target_obj(y: float, net: NodeME, target_pk: float, target_k: int) -> np.arr
 
 def me_obj(x: float, y: float, net: NodeME):
     """
-    Lemaitre objective function. 
+    Lemaitre objective function.
     pk = e^(-x*chi) * e^(-y*gamma) / Z
     Solve sum_k (k-k_mean)pk == 0
-    
-    :param x: Lagrange multiplier 
+
+    :param x: Lagrange multiplier
     :param y: Lagrange multiplier
     :param net: network object
     :type net: NodeMe object
@@ -210,7 +210,7 @@ def calculate_pk(x: float, y: float, net: NodeME, tol: float = -20) -> np.array:
     Calculate pk in logarithmic space to avoid underflow errors,
     as can get very small contributions from some ring sizes.
     pk = e^(-x*chi) * e^(-y*gamma) / Z
-    
+
     :param x: Lagrange multiplier
     :param y: Lagrange multiplier
     :param net: network object

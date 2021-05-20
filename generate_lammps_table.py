@@ -24,7 +24,7 @@ def quartquad_force(
 ) -> float:
     """
     The force corresponding to a quartic-quadratic potential.
-    
+
     Parameters
     ----------
     current_r
@@ -65,7 +65,7 @@ def quartquad(
 ) -> float:
     """
     The energy corresponding to a quartic-quadratic potential.
-    
+
     Parameters
     ----------
     current_r
@@ -131,7 +131,7 @@ def shifted_morse_potential(current_r, D_e=0.1657, r_eqm=50.0, alpha=0.15):
     """
     Morse Potential, given by
     V(x) = D_e( 1 - exp(alpha*(r - r_eqm)))^2 - D_e
-    
+
     Parameters
     ----------
     current_r
@@ -150,7 +150,7 @@ def shifted_morse_potential_force(current_r, D_e=0.1657, r_eqm=50.0, alpha=0.15)
     """
     Morse Potential, given by
     V(x) = D_e( 1 - exp(alpha*(r - r_eqm)))^2 - D_e
-    
+
     Parameters
     ----------
     current_r
@@ -207,7 +207,7 @@ def write_bond_table(
     """
     Write out a bond table in the lammps table format.
     Checks ENERGY_TO_FORCE to find a force function corresponding to func and uses scipy otherwise.
-    
+
     Parameters
     ----------
     func
@@ -246,7 +246,7 @@ def write_pair_table(
     """
     Write out a pair table in the lammps table format, which are slightly different to bond tables.
     Checks ENERGY_TO_FORCE to find a force function corresponding to func and uses scipy otherwise.
-    
+
     Parameters
     ----------
     func

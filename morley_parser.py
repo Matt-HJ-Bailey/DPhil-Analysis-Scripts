@@ -29,14 +29,14 @@ def load_morley(
 ) -> Tuple[Dict[int, np.array], nx.Graph, np.array]:
     """
     Load a graph in the Morley output format.
-    
+
     Parameters
     ----------
     prefix
         A string used to load {prefix}_crds.dat, {prefix}_net.dat and {prefix}_aux.dat
     reset_origin
         Should we move the bottom left coordinate to be (0, 0)
-    
+
     Returns
     -------
     positions, graph, box
@@ -100,7 +100,7 @@ def construct_morley_dual(
     """
     Construct the dual graph of this Morley graph.
     The dual graph connects centres of all polygons.
-    
+
     Doesn't work if the PeriodicRingFinder couldn't be imported
     """
 
@@ -156,7 +156,7 @@ def write_out_morley(
 ):
     """
     Write out into a netmc readable file.
-    
+
     Parameters
     ----------
     graph

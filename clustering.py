@@ -19,7 +19,7 @@ def apply_minimum_image_convention(
     """
     Apply the minimum image convention to a separation vector, given two half box lengths.
     That is, no two points can be separated by more than half a box length.
-    
+
     Parameters
     ----------
     vector

@@ -168,7 +168,7 @@ def hexagonal_lattice_graph(
     Return an `m` by `n` hexagonal lattice graph.
 
     Taken from networkx source code and modified by me, to remove the offset.
-    
+
     The *hexagonal lattice graph* is a graph whose nodes and edges are
     the `hexagonal tiling`_ of the plane.
 
@@ -246,7 +246,9 @@ def hexagonal_lattice_graph(
     h = np.sqrt(3) / 2
     yy = (h * j for i in cols for j in rows)
     # exclude nodes not in G
-    pos = {(i, j): (x, y) for i, j, x, y in zip(ii, jj, xx, yy) if (i, j) in G}
+    pos = {
+        (i, j): np.array([x, y]) for i, j, x, y in zip(ii, jj, xx, yy) if (i, j) in G
+    }
     nx.set_node_attributes(G, pos, "pos")
     return G
 

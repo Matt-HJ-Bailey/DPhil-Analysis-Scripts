@@ -58,7 +58,12 @@ def colour_graph(graph: nx.Graph, colour_to_type: Dict = COLOUR_TO_TYPE) -> nx.G
 
 
 def draw_periodic_coloured(
-    graph: nx.Graph, pos: Dict[int, np.array], periodic_box: np.array, ax=None, **kwargs
+    graph: nx.Graph,
+    pos: Dict[int, np.array],
+    periodic_box: np.array,
+    ax=None,
+    with_labels=False,
+    **kwargs,
 ):
     """
     Draw an aperiodic graph with the nodes coloured correctly.
@@ -155,7 +160,7 @@ def draw_periodic_coloured(
             new_pos_v += np.array([0, 2 * minimum_image_y])
 
         encounters[v] += 1
-        new_v = f"{v}_periodic_{encounters[v]}"
+        new_v = f"{v}_p{encounters[v]}"
         new_pos[new_v] = new_pos_v
         node_colours[new_v] = node_colours[v]
         node_colours_list.extend([node_colours[node_id] for node_id in (u, new_v)])
@@ -178,6 +183,9 @@ def draw_periodic_coloured(
         edgecolors="black",
         linewidths=0.5,
     )
+
+    if with_labels:
+        nx.draw_networkx_labels(graph, pos=new_pos, ax=ax)
 
     graph.remove_edges_from(temporary_edges)
     graph.remove_nodes_from(temporary_nodes)

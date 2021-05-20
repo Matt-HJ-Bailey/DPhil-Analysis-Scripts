@@ -89,10 +89,10 @@ def scale_rotate_to_fit(
 ):
     """
     Find the minimum non-colliding size of box for these WLCs.
-    
+
     This function aims to scale the centroid positions of the polymer_collection until we hit the
-    minimum size of box that fits. Along the way, jiggle each WLC about by rotating it about its 
-    centre of mass to see if that helps. 
+    minimum size of box that fits. Along the way, jiggle each WLC about by rotating it about its
+    centre of mass to see if that helps.
     The collision detection is O(N^2), so be careful for large polymer collections!
     Mutates the polymer collection that is input.
     :param polymer_collection: A list of polymer objects
@@ -126,7 +126,8 @@ def scale_rotate_to_fit(
         )
         for poly_idx, other_poly_idx in np.argwhere(collider_list):
             does_collide = polymer_collection[poly_idx].collides_with(
-                polymer_collection[other_poly_idx], periodic_box=periodic_box,
+                polymer_collection[other_poly_idx],
+                periodic_box=periodic_box,
             )
             if does_collide:
                 # Two are colliding. Randomly rotate one of them by a small amount.
