@@ -100,7 +100,7 @@ def calculate_angle_energy(
 
     u_v_to_sep = generate_u_v_to_sep(G, pos, periodic_cell)
 
-    K_ang = 10.0
+    K_ang = 1.0
     angle_energy = 0.0
     angle_forces = np.zeros_like(pos)
     for a in G.nodes():
@@ -258,13 +258,7 @@ def optimise_graph_positions(G: nx.Graph, periodic_cell: Optional[np.array] = No
         args=(G, periodic_cell, False),
         jac=True,
     )
-    # Then bonds+angles
-    res = scipy.optimize.minimize(
-        x0=res.x,
-        fun=calculate_graph_energy,
-        args=(G, periodic_cell, True),
-        jac=True,
-    )
+
     new_pos = res.x.reshape([len(G), 2])
     pos_dict = {u: new_pos[u] for u in sorted(G.nodes())}
     nx.set_node_attributes(G, pos_dict, name="pos")
@@ -378,8 +372,8 @@ def main():
         ]
     )
     G = do_bond_switch(G, periodic_cell)
+    G.remove_edge(69, 70)
     G = colour_graph(G)
-
     fig, ax = plt.subplots()
     draw_periodic_coloured(
         G, nx.get_node_attributes(G, "pos"), periodic_cell, with_labels=True, ax=ax
@@ -389,6 +383,7 @@ def main():
     optimise_graph_positions(G, periodic_cell)
     pos = nx.get_node_attributes(G, "pos")
     fig, ax = plt.subplots()
+    ax.axis("equal")
     draw_periodic_coloured(G, pos, periodic_cell, with_labels=True, ax=ax)
     fig.savefig("./graph-optimized.pdf")
     plt.close(fig)
@@ -399,7 +394,7 @@ def main():
     for key, val in pos.items():
         pos[key] *= scale_factor
     periodic_cell *= scale_factor
-    curves.to_lammps("./single-defect.data", periodic_box=periodic_cell, mass=0.5 / 6)
+    curves.to_lammps("./removed-edge.data", periodic_box=periodic_cell, mass=0.5 / 6)
 
 
 if __name__ == "__main__":
