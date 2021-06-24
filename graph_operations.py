@@ -6,17 +6,77 @@ Created on Thu May 20 11:32:46 2021
 @author: matthew-bailey
 """
 
+import sys
+import random
+import copy
+
 import networkx as nx
 import numpy as np
 import scipy.optimize
 import matplotlib.pyplot as plt
 
-from typing import Optional, Union, Dict, Any, Tuple
+from typing import Optional, Union, Dict, Any, Tuple, Set
 
 from graph_to_molecules import hexagonal_lattice_graph, graph_to_molecules
 from draw_and_colour import draw_periodic_coloured, colour_graph
 
 from rings.periodic_ring_finder import PeriodicRingFinder, RingFinder
+
+
+def systematic_perturbation(arr: np.array, epsilon: float):
+    for i in range(len(arr.ravel())):
+        new_arr = copy.deepcopy(arr.ravel())
+        new_arr[i] += epsilon
+        yield new_arr.reshape(arr.shape)
+
+
+def edges_at_topo_distance(G: nx.Graph, u, v, distance: int) -> Set[frozenset[Any]]:
+    """
+    Find the edges in a graph at a given topological distance.
+
+    The topological distance between two edges is measured as the number
+    of nodes visited on the shortest path between (u, v) and (a, b),
+    starting at the closest of (u, v) and ending at the closest of (a, b)
+    For example, two neighbouring edges have a topological distance of 1.
+    Two edges that are separated by 1 intermediate have a topological distance of 2.
+
+    Parameters
+    ----------
+    G
+        Networkx graph to find edges in
+    u
+        Label of one edge, (u, v) must be in G
+    v
+        Label of the other edge, (u, v) must be in G
+    distance
+        Topological depth to find edges at
+
+    Return
+    ------
+    edges
+        A set of frozensets, each representing an order-independent edge.
+    """
+    assert distance > 0, f"Distance must be positive, not {distance}"
+    assert G.has_edge(u, v), f"{u}, {v} not in the graph."
+    paths_u = {
+        key: val
+        for key, val in nx.single_source_shortest_path(G, u, cutoff=distance).items()
+        if len(val) == distance + 1
+    }
+    paths_v = {
+        key: val
+        for key, val in nx.single_source_shortest_path(G, v, cutoff=distance).items()
+        if len(val) == distance + 1
+    }
+    of_interest = dict()
+    of_interest.update(paths_u)
+    of_interest.update(paths_v)
+    if u in of_interest:
+        del of_interest[u]
+    if v in of_interest:
+        del of_interest[v]
+
+    return set(frozenset(val[-2:]) for val in of_interest.values())
 
 
 def generate_u_v_to_sep(
@@ -249,6 +309,10 @@ def optimise_graph_positions(G: nx.Graph, periodic_cell: Optional[np.array] = No
     None
         Modifies the graph G
     """
+    assert all(
+        degree > 1 for node, degree in G.degree()
+    ), "All nodes must be 2 coordinate or greater"
+    G = nx.relabel.convert_node_labels_to_integers(G)
     pos_dict = nx.get_node_attributes(G, "pos")
     positions = np.array([pos_dict[u] for u in sorted(G.nodes())])
     # Optimise bonds first
@@ -361,8 +425,105 @@ def steepest_descent(
     nx.set_node_attributes(G, pos_dict, name="pos")
 
 
+def remove_n_edges(G: nx.Graph, n: int):
+    """
+    Remove n edges from G.
+
+    This generates a procrystal-like graph with all nodes being
+    at least two coordinate.
+    If n is larger than the maximum number of edges to remove (m),
+    only remove m edges.
+
+    Parameters
+    ----------
+    G
+        The graph to remove edges from
+    n
+        The number of edges to remove
+
+    Returns
+    -------
+    G
+        G with up to n edges removed.
+    """
+    edges_removed = 0
+    edges = list(G.edges())
+    random.shuffle(edges)
+    while edges_removed < n:
+        u_neighbours = -1
+        v_neighbours = -1
+        while (u_neighbours < 3 or v_neighbours < 3) and len(edges) >= 1:
+            u, v = edges.pop()
+            u_neighbours, v_neighbours = len(G[u]), len(G[v])
+        if not edges:
+            break
+        G.remove_edge(u, v)
+        edges_removed += 1
+
+    return G, edges_removed
+
+
+def remove_single_coordinate(graph: nx.Graph) -> nx.Graph:
+    """
+    Remove all 1-coordinate nodes from the graph.
+
+    Parameters
+    ----------
+    graph
+        the graph to remove k=1 nodes from
+    """
+    k_1_nodes = [node for node, degree in graph.degree() if degree == 1]
+    while k_1_nodes:
+        graph.remove_nodes_from(k_1_nodes)
+        k_1_nodes = [node for node, degree in graph.degree() if degree == 1]
+    return graph
+
+
+def remove_nodes_around(graph: nx.Graph, centre, radius: int) -> nx.Graph:
+    """
+    Remove nodes in a given radius around a centre node.
+
+    A node is removed if the shortest path from it to the centre is
+    radius edges or fewer.
+
+    Parameters
+    ----------
+    graph
+        The graph to modify
+    centre
+        A node in the graph to remove
+    radius
+        Remove nodes this many edges or fewer away from the centre
+
+    Returns
+    -------
+    graph
+        A graph with a hole in the middle.
+    """
+    nodes = nx.single_source_shortest_path(graph, centre, radius)
+    graph.remove_nodes_from(nodes)
+    return graph
+
+
 def main():
+    for item in sys.argv[1:]:
+        if "help" in item.lower() or "h" in item.lower():
+            print("Usage: python ./graph_operations.py SIZE TO_REMOVE SEED")
+            print("SIZE -- the number of rings on one edge, must be even")
+            print("TO_REMOVE -- the number of edges to remove")
+            print("SEED -- random seed")
+            break
+
+    RANDOM_SEED = int(np.pi * 1e16)
+    if len(sys.argv) >= 4:
+        RANDOM_SEED = int(sys.argv[3])
+        random.seed(RANDOM_SEED)
+
+    # Set a default number of nodes and allow it to be overridden
     num_nodes = 6
+    if len(sys.argv) >= 2:
+        num_nodes = int(sys.argv[1])
+
     G = hexagonal_lattice_graph(num_nodes, num_nodes, periodic=True)
     G = nx.relabel.convert_node_labels_to_integers(G)
     periodic_cell = np.array(
@@ -371,21 +532,20 @@ def main():
             [0.0, num_nodes * np.sqrt(3)],
         ]
     )
-    G = do_bond_switch(G, periodic_cell)
-    G.remove_edge(69, 70)
+
+    if len(sys.argv) >= 3:
+        num_edges_to_remove = int(sys.argv[2])
+        remove_n_edges(G, num_edges_to_remove)
+
     G = colour_graph(G)
-    fig, ax = plt.subplots()
-    draw_periodic_coloured(
-        G, nx.get_node_attributes(G, "pos"), periodic_cell, with_labels=True, ax=ax
-    )
-    fig.savefig("./graph-unoptimized.pdf")
-    plt.close(fig)
+    G = remove_nodes_around(G, 30, 2)
+    G = remove_single_coordinate(G)
     optimise_graph_positions(G, periodic_cell)
     pos = nx.get_node_attributes(G, "pos")
     fig, ax = plt.subplots()
     ax.axis("equal")
-    draw_periodic_coloured(G, pos, periodic_cell, with_labels=True, ax=ax)
-    fig.savefig("./graph-optimized.pdf")
+    draw_periodic_coloured(G, pos, periodic_cell, with_labels=False, ax=ax)
+    fig.savefig("./graph-optimized.pdf", bbox_inches="tight")
     plt.close(fig)
 
     curves = graph_to_molecules(G, pos=pos, periodic_box=periodic_cell)
