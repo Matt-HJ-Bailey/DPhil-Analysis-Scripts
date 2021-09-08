@@ -505,6 +505,24 @@ def remove_nodes_around(graph: nx.Graph, centre, radius: int) -> nx.Graph:
     return graph
 
 
+
+def open_on_one_side(graph, periodic_box):
+    """
+    Open the network up on one side
+    """
+    
+    pos_dict = nx.get_node_attributes(graph, "pos")
+    x_cutoff = (periodic_box[0, 1] - periodic_box[0, 0]) / 2
+    to_remove = []
+    for u, v in graph.edges():
+        pos_u, pos_v = pos_dict[u], pos_dict[v]
+        diff = np.abs(pos_v - pos_u)
+        if diff[0] > x_cutoff:
+            to_remove.append((u, v))
+            
+    graph.remove_edges_from(to_remove)
+    return graph, periodic_box
+    
 def main():
     for item in sys.argv[1:]:
         if "help" in item.lower() or "h" in item.lower():
@@ -538,8 +556,11 @@ def main():
         remove_n_edges(G, num_edges_to_remove)
 
     G = colour_graph(G)
-    G = remove_nodes_around(G, 30, 2)
+    #G = remove_nodes_around(G, 30, 2)
     G = remove_single_coordinate(G)
+    print(periodic_cell)
+    open_on_one_side(G, periodic_cell)
+    print(periodic_cell)
     optimise_graph_positions(G, periodic_cell)
     pos = nx.get_node_attributes(G, "pos")
     fig, ax = plt.subplots()
