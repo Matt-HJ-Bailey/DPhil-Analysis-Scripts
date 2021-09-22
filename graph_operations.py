@@ -326,7 +326,7 @@ def optimise_graph_positions(G: nx.Graph, periodic_cell: Optional[np.array] = No
     new_pos = res.x.reshape([len(G), 2])
     pos_dict = {u: new_pos[u] for u in sorted(G.nodes())}
     nx.set_node_attributes(G, pos_dict, name="pos")
-
+    return G
 
 def do_bond_switch(G: nx.Graph, periodic_cell: Optional[np.array] = None):
     """
@@ -554,14 +554,15 @@ def main():
     if len(sys.argv) >= 3:
         num_edges_to_remove = int(sys.argv[2])
         remove_n_edges(G, num_edges_to_remove)
-
+    do_bond_switch(G, periodic_cell)
+    G.remove_edge(52, 53)
     G = colour_graph(G)
-    #G = remove_nodes_around(G, 30, 2)
+    #G = remove_nodes_around(G, 90, 1)
     G = remove_single_coordinate(G)
     print(periodic_cell)
-    open_on_one_side(G, periodic_cell)
+    #open_on_one_side(G, periodic_cell)
     print(periodic_cell)
-    optimise_graph_positions(G, periodic_cell)
+    G = optimise_graph_positions(G, periodic_cell)
     pos = nx.get_node_attributes(G, "pos")
     fig, ax = plt.subplots()
     ax.axis("equal")

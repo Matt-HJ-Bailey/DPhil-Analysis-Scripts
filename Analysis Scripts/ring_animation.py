@@ -19,6 +19,4 @@ if __name__ == "__main__":
     POS = nx.get_node_attributes(HEX_GRAPH, "pos")
     for node in HEX_GRAPH:
         print(node)
-    rf = PeriodicRingFinder(HEX_GRAPH,
-                            coords_dict=POS,
-                            cell=periodic_box)
+    rf = PeriodicRingFinder(HEX_GRAPH, coords_dict=POS, cell=periodic_box)

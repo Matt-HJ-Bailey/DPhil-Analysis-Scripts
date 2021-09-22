@@ -66,11 +66,11 @@ def li_smax_graph(degree_seq, create_using=None):
     the s-metric.  Experimental implementation.
 
     Maximum s-metrix  means that high degree nodes are connected to high
-    degree nodes. 
-        
+    degree nodes.
+
     - `degree_seq`: degree sequence, a list of integers with each entry
        corresponding to the degree of a node.
-       A non-graphical degree sequence raises an Exception.    
+       A non-graphical degree sequence raises an Exception.
     """
     degree_seq.sort()  # make sure it's sorted
     degree_seq.reverse()

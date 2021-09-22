@@ -162,7 +162,11 @@ def plot_line(xs, ys, ax, junction_points=None, plot_fit: bool = False):
     junctions. Can be None, indicating no junctions.
     :param plot_fit: plot the line of best fit as well.
     """
-    this_plot = ax.scatter(xs, -ys, marker="x",)
+    this_plot = ax.scatter(
+        xs,
+        -ys,
+        marker="x",
+    )
     if plot_fit:
         slope, intercept, rvalue = fit_line(xs, ys)
         nearest_xs, nearest_ys = find_nearest_points(xs, -ys, slope, intercept)
