@@ -335,6 +335,36 @@ def construct_alt_sq_lattice(
     return curves, periodic_box
 
 
+def rotate_one_curve(curves, curve_id: int, rotation: float, correct_com: bool = False):
+    """
+    Rotate a single curve around its end point.
+
+    Parameters
+    ----------
+    curves
+        An indexable of wormlike curves
+    curve_id
+        The index of the curve to rotate
+    rotation
+        How much to rotate it by in radians
+    correct_com
+        if true, keep the same centre of mass
+
+    Returns
+    -------
+        curves with one rotated
+    """
+    if correct_com:
+        old_com = curves[curve_id].centroid
+
+    curves[curve_id].rotate(rotation, recentre=False)
+    if correct_com:
+        com_offset = curves[curve_id].centroid - old_com
+        print("COM offset is", com_offset)
+        curves[curve_id].translate(-com_offset)
+    return curves
+
+
 if __name__ == "__main__":
     # FIG, AX = plt.subplots()
     SCALE_FACTOR = 1.0
@@ -368,11 +398,12 @@ if __name__ == "__main__":
     FIG, AX = plt.subplots()
     AX.axis("equal")
 
-    CURVES, PERIODIC_BOX = construct_hex_lattice(12, bond_length=50)
+    CURVES, PERIODIC_BOX = construct_hex_lattice(6, bond_length=50)
     kwarg_list = [
         {"end_size": 0.8 * 50, "linewidths": 0, "colors": "black"}
         for _ in range(len(CURVES))
     ]
+    rotate_one_curve(CURVES, 0, np.pi / 2.0, correct_com=True)
     CURVES.plot_onto(AX, kwarg_list, label_nodes=False)
     AX.set_axis_off()
 

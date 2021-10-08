@@ -328,6 +328,7 @@ def optimise_graph_positions(G: nx.Graph, periodic_cell: Optional[np.array] = No
     nx.set_node_attributes(G, pos_dict, name="pos")
     return G
 
+
 def do_bond_switch(G: nx.Graph, periodic_cell: Optional[np.array] = None):
     """
     Do a single Wooten-Winer-Weaire bond switch to the graph G.
@@ -505,12 +506,11 @@ def remove_nodes_around(graph: nx.Graph, centre, radius: int) -> nx.Graph:
     return graph
 
 
-
 def open_on_one_side(graph, periodic_box):
     """
     Open the network up on one side
     """
-    
+
     pos_dict = nx.get_node_attributes(graph, "pos")
     x_cutoff = (periodic_box[0, 1] - periodic_box[0, 0]) / 2
     to_remove = []
@@ -519,10 +519,11 @@ def open_on_one_side(graph, periodic_box):
         diff = np.abs(pos_v - pos_u)
         if diff[0] > x_cutoff:
             to_remove.append((u, v))
-            
+
     graph.remove_edges_from(to_remove)
     return graph, periodic_box
-    
+
+
 def main():
     for item in sys.argv[1:]:
         if "help" in item.lower() or "h" in item.lower():
@@ -557,10 +558,10 @@ def main():
     do_bond_switch(G, periodic_cell)
     G.remove_edge(52, 53)
     G = colour_graph(G)
-    #G = remove_nodes_around(G, 90, 1)
+    # G = remove_nodes_around(G, 90, 1)
     G = remove_single_coordinate(G)
     print(periodic_cell)
-    #open_on_one_side(G, periodic_cell)
+    # open_on_one_side(G, periodic_cell)
     print(periodic_cell)
     G = optimise_graph_positions(G, periodic_cell)
     pos = nx.get_node_attributes(G, "pos")
