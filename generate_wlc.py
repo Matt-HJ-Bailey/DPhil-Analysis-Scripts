@@ -220,7 +220,7 @@ if __name__ == "__main__":
             )
             idx = (i * NUM_X) + j
             POLYMER_COLLECTION[idx].translate(new_start_pos)
-            #POLYMER_COLLECTION[idx].recentre()
+            # POLYMER_COLLECTION[idx].recentre()
 
     scale_rotate_to_fit(POLYMER_COLLECTION)
 

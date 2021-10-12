@@ -224,8 +224,9 @@ if __name__ == "__main__":
         topology_file = "./Data/MSHP_0.05_2.data"
         output_prefix = "./outputs/MSHP_0.5_2"
 
-    universe = mda.Universe(position_file, topology=topology_file, format="LAMMPSDUMP")
-    ATOMS, MOLECS, BONDS = parse_molecule_topology(topology_file)
+    universe = mda.Universe(topology_file, position_file, format="LAMMPSDUMP")
+    _, _, ATOMS, MOLECS, BONDS, _ = parse_molecule_topology(topology_file)
+    BONDS = [val["atoms"] for _, val in BONDS.items()]
     TOTAL_GRAPH = nx.Graph()
     TOTAL_GRAPH.add_edges_from(BONDS)
     ATOM_TYPES = {atom_id: atom["type"] for atom_id, atom in ATOMS.items()}
@@ -242,9 +243,6 @@ if __name__ == "__main__":
         )
         # Find the terminal atoms, and group them into clusters.
         ALL_ATOMS = universe.select_atoms("all")
-        ALL_ATOMS.positions *= 1.0 / np.array(
-            [timestep.dimensions[0], timestep.dimensions[1], 1.0]
-        )
         ALL_ATOMS.positions -= np.min(ALL_ATOMS.positions, axis=0)
         TERMINALS = universe.select_atoms("type 2 or type 3")
         TERMINAL_PAIRS = find_lj_pairs(
