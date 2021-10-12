@@ -25,8 +25,8 @@ STD_LENGTH = 0
 SEGMENT_LENGTH = 50.0
 DEFAULT_STICKY_FRACTION = None
 MIN_SIZE = 3
-NUM_X = 5
-NUM_Y = 5
+NUM_X = 10
+NUM_Y = 10
 
 LINE_GRAPH = nx.path_graph(MEAN_LENGTH)
 TRIANGLE_GRAPH = nx.Graph()
@@ -220,25 +220,25 @@ if __name__ == "__main__":
             )
             idx = (i * NUM_X) + j
             POLYMER_COLLECTION[idx].translate(new_start_pos)
-            POLYMER_COLLECTION[idx].recentre()
+            #POLYMER_COLLECTION[idx].recentre()
 
     scale_rotate_to_fit(POLYMER_COLLECTION)
 
-    # FIG, AX = plt.subplots()
-    # AX.axis("equal")
+    FIG, AX = plt.subplots()
+    AX.axis("equal")
 
     for POLYMER in POLYMER_COLLECTION:
-        POLYMER.rotate(np.random.uniform(0, 2 * np.pi))
-    #    AX.add_artist(
-    #        patches.Circle(
-    #            POLYMER.centroid,
-    #            radius=POLYMER.circumcircle_radius(),
-    #            edgecolor="black",
-    #            fill=False,
-    #        )
-    #    )
-    # POLYMER_COLLECTION.plot_onto(AX, label_nodes=False, fit_edges=True)
+        POLYMER.rotate(np.random.uniform(0, 2 * np.pi), recentre=True)
+        AX.add_artist(
+            patches.Circle(
+                POLYMER.centroid,
+                radius=POLYMER.circumcircle_radius(),
+                edgecolor="black",
+                fill=False,
+            )
+        )
+    POLYMER_COLLECTION.plot_onto(AX, label_nodes=False, fit_edges=True)
     print("Writing to polymer_total.data")
     POLYMER_COLLECTION.to_lammps("polymer_total.data", mass=0.5 / MEAN_LENGTH)
-    # FIG.savefig("./initial.pdf")
+    FIG.savefig("./initial.pdf")
     # plt.show()
