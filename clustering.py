@@ -307,6 +307,8 @@ def connect_clusters(in_graph, clusters, out_graph=None, body_types=frozenset([4
             + " in find_molecule_terminals, or your cutoff radius."
         )
     out_graph.add_edges_from(added_edges)
+    cluster_data = {i: cluster for i, cluster in enumerate(clusters)}
+    nx.set_node_attributes(out_graph, cluster_data, name="cluster")
     return out_graph
 
 
