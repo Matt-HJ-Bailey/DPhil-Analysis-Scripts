@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib as mpl
+import matplotlib.patheffects as path_effects
 
 import MDAnalysis as mda
 import networkx as nx
@@ -29,219 +31,43 @@ from lammps_parser import parse_molecule_topology
 from rings.periodic_ring_finder import PeriodicRingFinder
 from rings.ring_finder import RingFinderError, convert_to_ring_graph
 from draw_and_colour import draw_periodic_coloured
-from nodeme import NodeME
+
+from analysis_files import AnalysisFiles
 
 LJ_BOND = 137.5
 FIND_BODIES = True
-STEP_SIZE = 25
+STEP_SIZE = 1
 DT = 0.001 * 20000
 
 
-class AnalysisFiles:
-    def __init__(self, prefix: str):
-
-        self.edges_prefixes = []
-        self.edges_data = []
-        self.edges_file = f"{prefix}_edges.dat"
-
-        self.areas_prefixes = []
-        self.areas_data = []
-        self.areas_file = f"{prefix}_areas.dat"
-
-        self.rings_prefixes = []
-        self.rings_data = []
-        self.rings_file = f"{prefix}_rings.dat"
-
-        self.coordinations_prefixes = []
-        self.coordinations_data = []
-        self.coordinations_file = f"{prefix}_coordinations.dat"
-
-        self.assortativity_prefixes = []
-        self.assortativity_data = []
-        self.assortativity_file = f"{prefix}_assortativity.dat"
-
-        self.maxent_prefixes = []
-        self.maxent_data = []
-        self.maxent_file = f"{prefix}_maxent.dat"
-
-        self.regularity_prefixes = []
-        self.regularity_data = []
-        self.regularity_file = f"{prefix}_regularity.dat"
-
-    def write_coordinations(self, prefix: str, graph: nx.Graph):
-        """
-        Buffer coordination data for later writing.
-
-        Parameters
-        ----------
-        graph : TYPE
-            DESCRIPTION.
-
-        Returns
-        -------
-        None.
-
-        """
-        coordination_counter = Counter([x[1] for x in graph.degree])
-        self.coordinations_data.append(coordination_counter)
-        self.coordinations_prefixes.append(str(prefix))
-
-    def write_areas(self, prefix: str, ring_list):
-        """
-        Buffer sorted area data for later writing
-        ----------
-        ring_list : TYPE
-            DESCRIPTION.
-
-        Returns
-        -------
-        None.
-
-        """
-        data = sorted([ring.area for ring in ring_list])
-        self.areas_data.append(data)
-        self.areas_prefixes.append(str(prefix))
-
-    def write_edge_lengths(self, prefix, edge_length_list):
-        self.edges_data.append(sorted(edge_length_list))
-        self.edges_prefixes.append(str(prefix))
-
-    def write_assortativity(self, prefix, assort):
-        self.assortativity_data.append(str(assort))
-        self.assortativity_prefixes.append(str(prefix))
-
-    def write_sizes(self, prefix, ring_list):
-        ring_sizes = Counter(len(ring) for ring in ring_list)
-        self.rings_data.append(ring_sizes)
-        self.rings_prefixes.append(str(prefix))
-
-    def write_maximum_entropy(self, prefix, ring_list):
-        ring_sizes = Counter(len(ring) for ring in ring_list)
-        modal_ring_size, number_modal = ring_sizes.most_common(1)[0]
-        me = NodeME(k_mean=modal_ring_size)(
-            target_pk=number_modal / len(ring_list), k=modal_ring_size
-        )
-        if me is not None:
-            self.maxent_data.append(me)
-        else:
-            self.maxent_data.append(np.array([np.nan for _ in range(3, 20)]))
-        self.maxent_prefixes.append(str(prefix))
-
-    def write_regularity(self, prefix, ring_list):
-        self.regularity_data.append([ring.regularity_metric() for ring in ring_list])
-        self.regularity_prefixes.append(str(prefix))
-
-    def flush(self):
-        # Write out coordinations
-        with open(self.coordinations_file, "w") as fi:
-            all_coordinations = set()
-            for row in self.coordinations_data:
-                all_coordinations = all_coordinations.union(row.keys())
-            all_coordinations = sorted(list(all_coordinations))
-            fi.write(
-                "# Timestep, "
-                + ", ".join([str(coordination) for coordination in all_coordinations])
-                + "\n"
-            )
-            for i, row in enumerate(self.coordinations_data):
-                fi.write(
-                    self.coordinations_prefixes[i]
-                    + ",  "
-                    + ", ".join(
-                        [str(row[coordination]) for coordination in all_coordinations]
-                    )
-                    + "\n"
-                )
-
-        with open(self.areas_file, "w") as fi:
-            fi.write("# Timestep, Ring Areas...\n")
-            for i, row in enumerate(self.areas_data):
-                fi.write(
-                    self.areas_prefixes[i]
-                    + ",  "
-                    + ", ".join(f"{item:.2f}" for item in row)
-                    + "\n"
-                )
-
-        with open(self.rings_file, "w") as fi:
-            all_sizes = set()
-            for row in self.rings_data:
-                all_sizes = all_sizes.union(row.keys())
-            all_sizes = sorted(list(all_sizes))
-            fi.write(
-                "# Timestep, " + ", ".join([str(size) for size in all_sizes]) + "\n"
-            )
-            for i, row in enumerate(self.rings_data):
-                fi.write(
-                    self.rings_prefixes[i]
-                    + ",  "
-                    + ", ".join([str(row.get(size, 0)) for size in all_sizes])
-                    + "\n"
-                )
-
-        with open(self.edges_file, "w") as fi:
-            fi.write("# Timestep, Edge Lengths...\n")
-            for i, row in enumerate(self.edges_data):
-                fi.write(
-                    self.edges_prefixes[i]
-                    + ",  "
-                    + ", ".join(f"{item:.2f}" for item in row)
-                    + "\n"
-                )
-
-        with open(self.assortativity_file, "w") as fi:
-            fi.write("# Timestep, Ring Assortativity\n")
-            for i, row in enumerate(self.assortativity_data):
-                fi.write(self.assortativity_prefixes[i] + ",  " + row + "\n")
-
-        with open(self.regularity_file, "w") as fi:
-            fi.write("# Timestep, Regularities...\n")
-            for i, row in enumerate(self.regularity_data):
-                fi.write(
-                    self.regularity_prefixes[i]
-                    + ",  "
-                    + ", ".join(f"{item:.2f}" for item in row)
-                    + "\n"
-                )
-
-        with open(self.maxent_file, "w") as fi:
-            fi.write(
-                "# Timestep, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20\n"
-            )
-            for i, row in enumerate(self.maxent_data):
-                fi.write(
-                    self.maxent_prefixes[i]
-                    + ",  "
-                    + ", ".join(f"{item:.2f}" for item in row)
-                    + "\n"
-                )
-
-
 def calculate_existence_matrix(
-    ring_trajectory: Iterable[Iterable[Any]], graph_trajectory: Iterable[nx.Graph]
+    ring_trajectory: Iterable[Iterable[Any]],
+    graph_trajectory: Iterable[nx.Graph],
+    all_atoms,
 ):
     """
     Calculate when a given ring can be said to exist.
     """
 
     # Find all unique rings
-    atoms_trajectory = []
+    molecs_trajectory = []
     ring_sizes = {}
     for ring_step, graph_step in zip(ring_trajectory, graph_trajectory):
-        atom_step = []
+        molec_step = []
         for ring in ring_step:
             size = len(ring)
-            atoms = shape_to_atoms(ring, graph_step)
-            ring_sizes[atoms] = size
-            atom_step.append(atoms)
+            molecs = shape_to_molecs(ring, graph_step)
+            ring_sizes[molecs] = size
+            assert size == len(molecs), "Each edge must be one molecule."
+            molec_step.append(molecs)
 
-        atoms_trajectory.append(frozenset(atom_step))
+        molecs_trajectory.append(frozenset(molec_step))
 
     # Get a unique list of all the rings, but in a consistent order
-    all_rings = sorted(list(frozenset().union(*atoms_trajectory)))
+    all_rings = sorted(list(frozenset().union(*molecs_trajectory)))
     existence_matrix = []
     for ring in all_rings:
-        is_in_step = [ring in step for step in atoms_trajectory]
+        is_in_step = [ring in step for step in molecs_trajectory]
         existence_matrix.append(is_in_step)
     existence_matrix = np.array(existence_matrix, dtype=bool)
     return existence_matrix, np.array([ring_sizes[ring] for ring in all_rings])
@@ -254,9 +80,30 @@ def shape_to_atoms(shape, graph):
 
     nodes = shape.to_node_list()
     clusters_data = nx.get_node_attributes(graph, "cluster")
-    clusters_in_shape = [clusters_data.get(node, frozenset()) for node in nodes]
+    true_nodes = [node % len(graph) for node in nodes]
+    clusters_in_shape = [clusters_data[true_node] for true_node in true_nodes]
     atoms_in_shape = frozenset().union(*clusters_in_shape)
     return atoms_in_shape
+
+
+def shape_to_molecs(shape, graph):
+    """
+    Get the atoms corresponding to this shape.
+    """
+
+    nodes = shape.to_node_list()
+    true_nodes = [node % len(graph) for node in nodes]
+    molec_data = nx.get_node_attributes(graph, "molec")
+    molec_counts = Counter()
+    for true_node in true_nodes:
+        assert (
+            true_node in graph
+        ), f"Node {true_node} not in graph with {len(graph)} nodes."
+        molec_counts.update(molec_data[true_node])
+    molecs_in_shape = frozenset(
+        [molec for molec, count in molec_counts.items() if count == 2]
+    )
+    return molecs_in_shape
 
 
 def main():
@@ -268,13 +115,13 @@ def main():
         topology_file = sys.argv[2]
         output_prefix = sys.argv[3]
     else:
-        topology_file = "../polymer_total.data"
+        topology_file = "./polymer_total.data"
         output_prefix = "./test"
-        position_file = "out.lammpstrj"
+        position_file = "output-equilibrate.lammpstrj"
 
     universe = mda.Universe(
-        "../polymer_total.data",
-        ["output-equilibrate.lammpstrj.gz", "output-stretch.lammpstrj.gz"],
+        "./removed-edge.data",
+        "output-equilibrate.lammpstrj",
         format="LAMMPSDUMP",
         dt=0.001 * 20000,
     )
@@ -282,13 +129,19 @@ def main():
     bonds = [val["atoms"] for _, val in bonds.items()]
     total_graph = nx.Graph()
     total_graph.add_edges_from(bonds)
+
+    bond_molecs = {}
+    for u, v in bonds:
+        molec_u, molec_v = atoms[u]["molec"], atoms[v]["molec"]
+        assert molec_u == molec_v, "Bonded atoms must be in same molecule"
+        bond_molecs[u, v] = molec_u
+    nx.set_edge_attributes(total_graph, bond_molecs, name="molec")
+
     atom_types = {atom_id: atom["type"] for atom_id, atom in atoms.items()}
     nx.set_node_attributes(total_graph, atom_types, name="atom_types")
-    molec_types = {
-        molec_id: [atom_types[atom_id] for atom_id in molec]
-        for molec_id, molec in molecs.items()
-    }
+    molec_types = {atom_id: atom["molec"] for atom_id, atom in atoms.items()}
 
+    nx.set_node_attributes(total_graph, molec_types, name="molec")
     ring_trajectory, graph_trajectory = [], []
     output_files = AnalysisFiles(output_prefix)
     for timestep in universe.trajectory[::STEP_SIZE]:
@@ -314,7 +167,9 @@ def main():
         cluster_positions = find_cluster_centres(
             all_clusters, all_atoms.positions, cutoff=50.0
         )
+
         G = connect_clusters(in_graph=total_graph, clusters=all_clusters)
+        nx.set_node_attributes(G, cluster_positions, "pos")
         colours = dict()
         for i, cluster in enumerate(all_clusters):
             cluster_atom_types = [universe.atoms[atom - 1].type for atom in cluster]
@@ -322,15 +177,15 @@ def main():
             colours[i] = (int(modal_type),)
         # nx.draw(g, pos=cluster_positions)
         nx.set_node_attributes(G, colours, name="color")
-        # fig, ax = plt.subplots()
-        # ax.set_xlim(0, timestep.dimensions[0])
-        # ax.set_ylim(0, timestep.dimensions[1])
+        fig, ax = plt.subplots()
+        ax.set_xlim(0, timestep.dimensions[0])
+        ax.set_ylim(0, timestep.dimensions[1])
         ring_finder_successful = True
         try:
             ring_finder = PeriodicRingFinder(G, cluster_positions, periodic_box)
-            # ring_finder.draw_onto(
-            #    ax, cmap_name="tab20b", min_ring_size=4, max_ring_size=30
-            # )
+            ring_finder.draw_onto(
+                ax, cmap_name="tab20b", min_ring_size=4, max_ring_size=30
+            )
 
             ring_graph = convert_to_ring_graph(ring_finder.current_rings)
             # Convert each ring into atoms which have a persistent ID
@@ -349,13 +204,29 @@ def main():
             print("Failed with networkx error: ", ex)
             ring_finder_successful = False
             ring_trajectory.append([])
-        # draw_periodic_coloured(
-        #    G, pos=cluster_positions, periodic_box=periodic_box, ax=ax
-        # )
+        draw_periodic_coloured(
+            G, pos=cluster_positions, periodic_box=periodic_box, ax=ax
+        )
+        for node, data in G.nodes(data=True):
+            text = ax.text(
+                data["pos"][0],
+                data["pos"][1],
+                ",".join(str(item) for item in data["molec"]),
+                horizontalalignment="center",
+                verticalalignment="center",
+                color="white",
+                fontsize=6,
+            )
+            text.set_path_effects(
+                [
+                    path_effects.Stroke(linewidth=1, foreground="black"),
+                    path_effects.Normal(),
+                ]
+            )
 
-        # ax.axis("off")
-        # fig.savefig(f"{output_prefix}_{universe.trajectory.time}.pdf")
-        # plt.close(fig)
+        ax.axis("off")
+        fig.savefig(f"{output_prefix}_{universe.trajectory.time}.pdf")
+        plt.close(fig)
         if ring_finder_successful:
 
             output_files.write_coordinations(universe.trajectory.time, G)
@@ -383,7 +254,7 @@ def main():
 
     output_files.flush()
     existence_matrix, ring_sizes = calculate_existence_matrix(
-        ring_trajectory, graph_trajectory
+        ring_trajectory, graph_trajectory, atoms
     )
     print(existence_matrix.shape)
     births, deaths = [], []
@@ -403,10 +274,10 @@ def main():
         norm=colors.Normalize(vmin=3, vmax=10, clip=True), cmap="coolwarm"
     )
     ax.scatter(births, deaths, c=cmapper.to_rgba(ring_sizes))
-    ax.axvline(10.0, linestyle="dotted", color="black")
-    ax.axhline(10.0, linestyle="dotted", color="black")
-    ax.set_xlim(0, 110)
-    ax.set_ylim(0, 110)
+    # ax.axvline(10.0, linestyle="dotted", color="black")
+    # ax.axhline(10.0, linestyle="dotted", color="black")
+    # ax.set_xlim(0, 110)
+    # ax.set_ylim(0, 110)
     cbar = fig.colorbar(cmapper, cax=cax)
     cbar.ax.set_ylabel("Ring Size", rotation=270)
     ax.set_xlabel("Birth / microsecond")
@@ -486,7 +357,7 @@ def main():
     all_ymaxs = np.asarray(all_ymaxs)[x_order]
     ax.vlines(all_xs, all_ymins, all_ymaxs, colors=cmapper.to_rgba(ring_sizes))
     ax.set_ylabel("Time / microsecond")
-    ax.set_ylim(0, 110)
+    # ax.set_ylim(0, 110)
     ax.set_xlabel("Ring ID")
     ax.set_xlim(0, existence_matrix.shape[0])
     fig.savefig("./lifetimes.pdf")

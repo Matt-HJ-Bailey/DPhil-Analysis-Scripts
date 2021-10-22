@@ -107,7 +107,11 @@ def parse_molecule_topology(
                 molec_id = int(molec_id)
                 atom_type = int(atom_type)
                 x, y, z = float(x), float(y), float(z)
-                atoms[atom_id] = {"type": atom_type, "pos": np.array([x, y, z])}
+                atoms[atom_id] = {
+                    "type": atom_type,
+                    "pos": np.array([x, y, z]),
+                    "molec": molec_id,
+                }
                 molecules[molec_id].append(atom_id)
             if bonds_mode:
                 try:

@@ -215,7 +215,7 @@ def connect_clusters(in_graph, clusters, out_graph=None, body_types=frozenset([4
     atom_types = nx.get_node_attributes(in_graph, name="atom_types")
     if not atom_types:
         raise AttributeError("in_graph must have node attribute 'atom_types'")
-
+    atom_to_molec = nx.get_node_attributes(in_graph, name="molec")
     # Calculate the body atom id -> cluster id link in advance
     body_cluster_ids = {}
     for atom in in_graph:
@@ -230,6 +230,11 @@ def connect_clusters(in_graph, clusters, out_graph=None, body_types=frozenset([4
     # Each cluster is made up of atoms which each belong to distinct
     # connected components of the graph. Find those connected components,
     # and then find the other clusters in each one.
+    clusters = sorted(list(clusters))
+    out_graph.add_nodes_from(range(len(clusters)))
+    nx.set_node_attributes(
+        out_graph, {i: cluster for i, cluster in enumerate(clusters)}, "cluster"
+    )
     for i, cluster in enumerate(clusters):
         components_in_cluster = [node_connected_components[atom] for atom in cluster]
         all_nodes = set().union(*components_in_cluster)
@@ -307,8 +312,12 @@ def connect_clusters(in_graph, clusters, out_graph=None, body_types=frozenset([4
             + " in find_molecule_terminals, or your cutoff radius."
         )
     out_graph.add_edges_from(added_edges)
-    cluster_data = {i: cluster for i, cluster in enumerate(clusters)}
-    nx.set_node_attributes(out_graph, cluster_data, name="cluster")
+
+    molec_data = {
+        i: frozenset(atom_to_molec[atom] for atom in cluster)
+        for i, cluster in enumerate(clusters)
+    }
+    nx.set_node_attributes(out_graph, molec_data, "molec")
     return out_graph
 
 
