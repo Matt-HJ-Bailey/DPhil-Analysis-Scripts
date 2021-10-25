@@ -7,6 +7,7 @@ Created on Wed Oct  9 13:26:50 2019
 """
 
 import sys
+import copy
 from collections import Counter, defaultdict
 
 from typing import Iterable, Any, Dict, List, Tuple, Set, Optional
@@ -36,8 +37,8 @@ from analysis_files import AnalysisFiles
 
 LJ_BOND = 137.5
 FIND_BODIES = True
-STEP_SIZE = 500
-DT = 0.001 * 20000
+STEP_SIZE = 5
+DT = 0.001 * 10000
 
 
 def calculate_existence_matrix(
@@ -75,15 +76,11 @@ def calculate_existence_matrix(
             size = len(ring)
             molecs = shape_to_molecs(ring, graph_step)
             ring_sizes[molecs] = size
-            if size == len(molecs):
-                molec_step.append(molecs)
-            else:
-                print(ring, f"is bad, it is of size {size} but has molecs {molecs}")
-
+            molec_step.append(molecs)
         molecs_trajectory.append(frozenset(molec_step))
 
     # Get a unique list of all the rings, but in a consistent order
-    all_rings = sorted(list(frozenset().union(*molecs_trajectory)))
+    all_rings = sorted(list(frozenset().union(*molecs_trajectory)), key=tuple)
     existence_matrix = []
     for ring in all_rings:
         is_in_step = [ring in step for step in molecs_trajectory]
@@ -266,39 +263,44 @@ def plot_lifetimes(existence_matrix, ring_sizes, fig=None, ax=None):
     for unique_x in range(existence_matrix.shape[0]):
         lines_at_x = [line for line in lines if line[0] == unique_x]
         lowest_ymin = min([line[1] for line in lines_at_x])
-        lowest_ymins.append((lines_at_x[0][0], lowest_ymin))
+        highest_ymax = max([line[2] for line in lines_at_x])
+        lowest_ymins.append((lines_at_x[0][0], lowest_ymin, highest_ymax))
 
-    ymins_order = np.argsort([item[1] for item in lowest_ymins])
+    ymins_sorting_arr = np.array([(item[1], item[2]) for item in lowest_ymins], dtype=[("ymin", float), ("ymax", float)])
+    # ymins_order = np.argsort([item[1] for item in lowest_ymins])
+    ymins_order = np.argsort(ymins_sorting_arr, order=("ymin", "ymax"))
     xmapper = {old_idx: new_idx for new_idx, old_idx in enumerate(ymins_order)}
 
     all_xs = []
     all_ymins = []
     all_ymaxs = []
+    all_sizes = []
     for line_idx in range(len(lines)):
         x, y_min, y_max = lines[line_idx]
         all_xs.append(xmapper[x])
         all_ymins.append(y_min)
         all_ymaxs.append(y_max)
+        all_sizes.append(ring_sizes[x])
 
     x_order = np.argsort(all_xs)
     all_xs = np.asarray(all_xs)[x_order]
     all_ymins = np.asarray(all_ymins)[x_order]
     all_ymaxs = np.asarray(all_ymaxs)[x_order]
-
+    all_sizes = np.asarray(all_sizes)[x_order]
+    
     cmapper = cm.ScalarMappable(
-        norm=colors.Normalize(vmin=3, vmax=10, clip=True), cmap="coolwarm"
+        norm=colors.Normalize(vmin=3, vmax=20, clip=True), cmap="coolwarm"
     )
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
 
     cbar = fig.colorbar(cmapper, cax=cax)
     cbar.ax.set_ylabel("Ring Size", rotation=270)
-
-    ring_colors = cmapper.to_rgba([ring_sizes[x] for x in all_xs])
+    ring_colors = cmapper.to_rgba(all_sizes)
     ax.vlines(all_xs, all_ymins, all_ymaxs, colors=ring_colors)
     ax.set_ylabel("Time / microsecond")
-    ax.set_ylim(0, 200)
-    ax.axhline(100.0, color="black", linestyle="dotted")
+    ax.set_ylim(-5, 100)
+    # ax.axhline(100.0, color="black", linestyle="dotted")
 
     # Find the index of the ring that was first born after
     # the mode switch by starting at the end
@@ -306,7 +308,7 @@ def plot_lifetimes(existence_matrix, ring_sizes, fig=None, ax=None):
     first_born_after = all_ymins.shape[0] - 1
     while all_ymins[first_born_after] >= 100.0:
         first_born_after -= 1
-    ax.axvline(all_xs[first_born_after], color="black", linestyle="dotted")
+    #ax.axvline(all_xs[first_born_after], color="black", linestyle="dotted")
 
     ax.set_xlabel("Ring ID")
     ax.set_xlim(0, existence_matrix.shape[0])
@@ -360,15 +362,15 @@ def main():
         topology_file = sys.argv[2]
         output_prefix = sys.argv[3]
     else:
-        topology_file = "./polymer_total.data"
+        topology_file = "./removed-edge-1.data"
         output_prefix = "./test"
         position_file = "output-equilibrate.lammpstrj"
 
     universe = mda.Universe(
         topology_file,
-        ["output-assembly.lammpstrj", "output-stretch.lammpstrj"],
+        ["output-stretch.lammpstrj"],
         format="LAMMPSDUMP",
-        dt=0.001 * 20000,
+        dt=0.001 * 10000,
     )
     _, _, atoms, molecs, bonds, _ = parse_molecule_topology(topology_file)
     bonds = [val["atoms"] for _, val in bonds.items()]
@@ -436,27 +438,27 @@ def main():
             ring_finder = PeriodicRingFinder(G, cluster_positions, periodic_box)
             # Convert each ring into atoms which have a persistent ID
             # between steps
-            graph_trajectory.append(G)
+            graph_trajectory.append(copy.deepcopy(G))
             ring_trajectory.append(ring_finder.current_rings)
         except RingFinderError as ex:
             print("failed with code: ", ex)
             ring_finder_successful = False
-            graph_trajectory.append(G)
+            graph_trajectory.append(copy.deepcopy(G))
             ring_trajectory.append([])
         except ValueError as ex:
             print("failed with value code: ", ex)
             ring_finder_successful = False
-            graph_trajectory.append(G)
+            graph_trajectory.append(copy.deepcopy(G))
             ring_trajectory.append([])
         except nx.exception.NetworkXError as ex:
             print("Failed with networkx error: ", ex)
             ring_finder_successful = False
-            graph_trajectory.append(G)
+            graph_trajectory.append(copy.deepcopy(G))
             ring_trajectory.append([])
         except RuntimeError as ex:
             print("failed with RuntimeError: ", ex)
             ring_finder_successful = False
-            graph_trajectory.append(G)
+            graph_trajectory.append(copy.deepcopy(G))
             ring_trajectory.append([])
         if ring_finder_successful:
             #fig, ax = plt.subplots()
@@ -488,10 +490,11 @@ def main():
         norm=colors.Normalize(vmin=3, vmax=10, clip=True), cmap="coolwarm"
     )
     ax.scatter(births, deaths, c=cmapper.to_rgba(ring_sizes))
-    ax.axvline(100.0, linestyle="dotted", color="black")
-    ax.axhline(100.0, linestyle="dotted", color="black")
-    ax.set_xlim(0, 200)
-    ax.set_ylim(0, 200)
+    ax.plot([0, 0], [110, 110], linestyle="dotted", color="black")
+    #ax.axvline(100.0, linestyle="dotted", color="black")
+    #ax.axhline(100.0, linestyle="dotted", color="black")
+    ax.set_xlim(0, 110)
+    ax.set_ylim(0, 110)
     cbar = fig.colorbar(cmapper, cax=cax)
     cbar.ax.set_ylabel("Ring Size", rotation=270)
     ax.set_xlabel("Birth / microsecond")
