@@ -9,12 +9,11 @@ Created on Wed Oct  9 13:26:50 2019
 import sys
 from collections import Counter, defaultdict
 
-from typing import Iterable, Any
+from typing import Iterable, Any, Dict, List, Tuple, Set, Optional
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import matplotlib as mpl
 import matplotlib.patheffects as path_effects
 
 import MDAnalysis as mda
@@ -26,6 +25,7 @@ from clustering import (
     find_lj_clusters,
     find_cluster_centres,
     connect_clusters,
+    apply_minimum_image_convention
 )
 from lammps_parser import parse_molecule_topology
 from rings.periodic_ring_finder import PeriodicRingFinder
@@ -36,19 +36,36 @@ from analysis_files import AnalysisFiles
 
 LJ_BOND = 137.5
 FIND_BODIES = True
-STEP_SIZE = 1
+STEP_SIZE = 500
 DT = 0.001 * 20000
 
 
 def calculate_existence_matrix(
     ring_trajectory: Iterable[Iterable[Any]],
     graph_trajectory: Iterable[nx.Graph],
-    all_atoms,
-):
+    all_atoms: Dict,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Calculate when a given ring can be said to exist.
-    """
 
+    Parameters
+    ----------
+    ring_trajectory
+        An iterable containing a set of rings, one for each step
+    graph_trajectory
+        An iterable containing graphs at each step
+    all_atoms
+        A dictionary containing atom data
+
+    Returns
+    -------
+    np.ndarray
+        The existence matrix of size [num rings, steps], True if ring i exists at step j
+    np.ndarray
+        The sizes of each unique ring
+    """
+    assert len(ring_trajectory) == len(graph_trajectory), f"Ring trajectory {len(ring_trajectory)}" +\
+        "and graph trajectory {len(graph_trajectory)} must have the same size."
     # Find all unique rings
     molecs_trajectory = []
     ring_sizes = {}
@@ -58,8 +75,10 @@ def calculate_existence_matrix(
             size = len(ring)
             molecs = shape_to_molecs(ring, graph_step)
             ring_sizes[molecs] = size
-            assert size == len(molecs), "Each edge must be one molecule."
-            molec_step.append(molecs)
+            if size == len(molecs):
+                molec_step.append(molecs)
+            else:
+                print(ring, f"is bad, it is of size {size} but has molecs {molecs}")
 
         molecs_trajectory.append(frozenset(molec_step))
 
@@ -106,200 +125,110 @@ def shape_to_molecs(shape, graph):
     return molecs_in_shape
 
 
-def main():
-    # Parsing section -- read the files, and split the atoms
-    # and molecules into a few types. This could probably
-    # be neatened with more use of MDA.
-    if len(sys.argv) == 4:
-        position_file = sys.argv[1]
-        topology_file = sys.argv[2]
-        output_prefix = sys.argv[3]
-    else:
-        topology_file = "./polymer_total.data"
-        output_prefix = "./test"
-        position_file = "output-equilibrate.lammpstrj"
+def find_broken_bonds(bonds: Iterable[Tuple[int, int]],
+                      positions: np.ndarray,
+                      periodic_box: np.ndarray) -> Set[Set[int]]:
+    """
+    Find which bonds have been broken this step.
 
-    universe = mda.Universe(
-        "./removed-edge.data",
-        "output-equilibrate.lammpstrj",
-        format="LAMMPSDUMP",
-        dt=0.001 * 20000,
-    )
-    _, _, atoms, molecs, bonds, _ = parse_molecule_topology(topology_file)
-    bonds = [val["atoms"] for _, val in bonds.items()]
-    total_graph = nx.Graph()
-    total_graph.add_edges_from(bonds)
+    A broken bond is one that is over LJ_BOND length in this step,
+    taking the minimum image convention into account.
+    Watch out for bond indices not matching positions data.
 
-    bond_molecs = {}
+    Parameters
+    ----------
+    bonds
+        Iterable of pairs of atomic ids.
+    positions
+        Nx3 array of positions
+    periodic_box
+        3x2 array in the form [[0, x_max], [0, y_max], [0, z_max]]
+
+    Returns
+    -------
+        Frozenset of frozensets, where each subset is a (u, v) pair.
+    """
+    broken_bonds = []
     for u, v in bonds:
-        molec_u, molec_v = atoms[u]["molec"], atoms[v]["molec"]
-        assert molec_u == molec_v, "Bonded atoms must be in same molecule"
-        bond_molecs[u, v] = molec_u
-    nx.set_edge_attributes(total_graph, bond_molecs, name="molec")
+        x_mic, y_mic = periodic_box[:, 1] / 2
+        # -1 is for LAMMPS offset
+        bond_vec = positions[u - 1, :] - positions[v - 1, :]
+        bond_vec = apply_minimum_image_convention(bond_vec, x_mic, y_mic)
+        # All bonds over 137.5 are permanently broken
+        if np.linalg.norm(bond_vec) > LJ_BOND:
+            broken_bonds.append(frozenset([u, v]))
+    return frozenset(broken_bonds)
 
-    atom_types = {atom_id: atom["type"] for atom_id, atom in atoms.items()}
-    nx.set_node_attributes(total_graph, atom_types, name="atom_types")
-    molec_types = {atom_id: atom["molec"] for atom_id, atom in atoms.items()}
 
-    nx.set_node_attributes(total_graph, molec_types, name="molec")
-    ring_trajectory, graph_trajectory = [], []
-    output_files = AnalysisFiles(output_prefix)
-    for timestep in universe.trajectory[::STEP_SIZE]:
-        print(timestep, "out of", len(universe.trajectory), timestep.time)
-        periodic_box = np.array(
-            [[0, timestep.dimensions[0]], [0, timestep.dimensions[1]]]
-        )
-        # find the terminal atoms, and group them into clusters.
-        all_atoms = universe.select_atoms("all")
-        all_atoms.positions -= np.min(all_atoms.positions, axis=0)
-        terminals = universe.select_atoms("type 2 or type 3")
-        terminal_pairs = find_lj_pairs(
-            terminals.positions, terminals.ids, LJ_BOND, cell=periodic_box
-        )
-        terminal_clusters = find_lj_clusters(terminal_pairs)
+def draw_rings(ring_finder, timestep, graph, ax=None):
+    """
+    Draw the rings, with labels if need be.
 
-        body_clusters = [
-            frozenset([item]) for item in universe.select_atoms("type 4").ids
-        ]
-        all_clusters = sorted(list(terminal_clusters.union(body_clusters)))
-        # sort the list of clusters into a consistent list so
-        # we can index them.
-        cluster_positions = find_cluster_centres(
-            all_clusters, all_atoms.positions, cutoff=50.0
-        )
+    Parameters
+    ----------
+    ring_finder
 
-        G = connect_clusters(in_graph=total_graph, clusters=all_clusters)
-        nx.set_node_attributes(G, cluster_positions, "pos")
-        colours = dict()
-        for i, cluster in enumerate(all_clusters):
-            cluster_atom_types = [universe.atoms[atom - 1].type for atom in cluster]
-            modal_type = Counter(cluster_atom_types).most_common(1)[0][0]
-            colours[i] = (int(modal_type),)
-        # nx.draw(g, pos=cluster_positions)
-        nx.set_node_attributes(G, colours, name="color")
+    timestep
+        An mdanalysis timestep
+    graph
+        A graph of edges that the ring finder used.
+    title
+        The name to save the graph to
+    """
+    if ax is None:
         fig, ax = plt.subplots()
-        ax.set_xlim(0, timestep.dimensions[0])
-        ax.set_ylim(0, timestep.dimensions[1])
-        ring_finder_successful = True
-        try:
-            ring_finder = PeriodicRingFinder(G, cluster_positions, periodic_box)
-            ring_finder.draw_onto(
-                ax, cmap_name="tab20b", min_ring_size=4, max_ring_size=30
-            )
 
-            ring_graph = convert_to_ring_graph(ring_finder.current_rings)
-            # Convert each ring into atoms which have a persistent ID
-            # between steps
-            graph_trajectory.append(G)
-            ring_trajectory.append(ring_finder.current_rings)
-        except RingFinderError as ex:
-            print("failed with code: ", ex)
-            ring_finder_successful = False
-            ring_trajectory.append([])
-        except ValueError as ex:
-            print("failed with value code: ", ex)
-            ring_finder_successful = False
-            ring_trajectory.append([])
-        except nx.exception.NetworkXError as ex:
-            print("Failed with networkx error: ", ex)
-            ring_finder_successful = False
-            ring_trajectory.append([])
-        draw_periodic_coloured(
-            G, pos=cluster_positions, periodic_box=periodic_box, ax=ax
-        )
-        for node, data in G.nodes(data=True):
-            text = ax.text(
-                data["pos"][0],
-                data["pos"][1],
-                ",".join(str(item) for item in data["molec"]),
-                horizontalalignment="center",
-                verticalalignment="center",
-                color="white",
-                fontsize=6,
-            )
-            text.set_path_effects(
-                [
-                    path_effects.Stroke(linewidth=1, foreground="black"),
-                    path_effects.Normal(),
-                ]
-            )
-
-        ax.axis("off")
-        fig.savefig(f"{output_prefix}_{universe.trajectory.time}.pdf")
-        plt.close(fig)
-        if ring_finder_successful:
-
-            output_files.write_coordinations(universe.trajectory.time, G)
-            output_files.write_areas(
-                universe.trajectory.time, ring_finder.current_rings
-            )
-            output_files.write_sizes(
-                universe.trajectory.time, ring_finder.current_rings
-            )
-            output_files.write_regularity(
-                universe.trajectory.time, ring_finder.current_rings
-            )
-
-            output_files.write_maximum_entropy(
-                universe.trajectory.time, ring_finder.current_rings
-            )
-            output_files.write_edge_lengths(
-                universe.trajectory.time, ring_finder.analyse_edges()
-            )
-            try:
-                assortativity = nx.numeric_assortativity_coefficient(ring_graph, "size")
-            except ValueError:
-                assortativity = np.nan
-            output_files.write_assortativity(universe.trajectory.time, assortativity)
-
-    output_files.flush()
-    existence_matrix, ring_sizes = calculate_existence_matrix(
-        ring_trajectory, graph_trajectory, atoms
+    ax.set_xlim(0, timestep.dimensions[0])
+    ax.set_ylim(0, timestep.dimensions[1])
+    ring_finder.draw_onto(
+        ax, cmap_name="tab20b", min_ring_size=4, max_ring_size=30
     )
-    print(existence_matrix.shape)
-    births, deaths = [], []
-    lifespans = defaultdict(list)
-    for i in range(existence_matrix.shape[0]):
-        is_true = np.where(existence_matrix[i, :])[0]
-        births.append(np.min(is_true) * STEP_SIZE * DT * 1e-3)
-        deaths.append(np.max(is_true) * STEP_SIZE * DT * 1e-3)
-        lifespans[ring_sizes[i]].append(
-            max(deaths[-1] - births[-1], STEP_SIZE * DT * 1e-3)
+
+    draw_periodic_coloured(
+        graph,
+        periodic_box=np.array([[0, timestep.dimensions[0]], [0, timestep.dimensions[1]]]),
+        ax=ax
+    )
+    for node, data in graph.nodes(data=True):
+        text = ax.text(
+            data["pos"][0],
+            data["pos"][1],
+            ",".join(str(item) for item in data["molec"]),
+            horizontalalignment="center",
+            verticalalignment="center",
+            color="white",
+            fontsize=6,
+        )
+        text.set_path_effects(
+            [
+                path_effects.Stroke(linewidth=1, foreground="black"),
+                path_effects.Normal(),
+            ]
         )
 
-    fig, ax = plt.subplots()
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-    cmapper = cm.ScalarMappable(
-        norm=colors.Normalize(vmin=3, vmax=10, clip=True), cmap="coolwarm"
-    )
-    ax.scatter(births, deaths, c=cmapper.to_rgba(ring_sizes))
-    # ax.axvline(10.0, linestyle="dotted", color="black")
-    # ax.axhline(10.0, linestyle="dotted", color="black")
-    # ax.set_xlim(0, 110)
-    # ax.set_ylim(0, 110)
-    cbar = fig.colorbar(cmapper, cax=cax)
-    cbar.ax.set_ylabel("Ring Size", rotation=270)
-    ax.set_xlabel("Birth / microsecond")
-    ax.set_ylabel("Death / microsecond")
-    fig.savefig("birth-death.pdf")
-    plt.close(fig)
+    ax.axis("off")
 
-    ring_size_list = list(range(min(lifespans.keys()), max(lifespans.keys())))
-    fig, ax = plt.subplots()
-    mean_lifespans = [np.mean(lifespans[ring_size]) for ring_size in ring_size_list]
-    std_lifespans = [
-        np.std(lifespans[ring_size], ddof=1) for ring_size in ring_size_list
-    ]
-    ax.errorbar(ring_size_list, mean_lifespans, std_lifespans)
-    ax.set_ylabel("Lifespan / microsecond")
-    ax.set_xlabel("Ring Size")
-    ax.set_ylim(0, 20)
-    ax.set_xlim(0, 20)
-    fig.savefig("./lifespan.pdf")
-    plt.close(fig)
 
-    fig, ax = plt.subplots()
+def plot_lifetimes(existence_matrix, ring_sizes, fig=None, ax=None):
+    """
+    Plot lifetime bars, coloured by ring size.
+
+    Parameters
+    ----------
+    existence_matrix
+        NxT bool matrix, with N unique rings over T timesteps.
+    ring_sizes
+        Nx1 int matrix containing the size of each ring
+    ax
+        The ax to plot onto
+
+    Returns
+    -------
+        ax with lifetime bars on it
+
+    """
+    if ax is None and ax is None:
+        fig, ax = plt.subplots()
     lines = []
     for i in range(existence_matrix.shape[0]):
         current_run = []
@@ -355,13 +284,239 @@ def main():
     all_xs = np.asarray(all_xs)[x_order]
     all_ymins = np.asarray(all_ymins)[x_order]
     all_ymaxs = np.asarray(all_ymaxs)[x_order]
-    ax.vlines(all_xs, all_ymins, all_ymaxs, colors=cmapper.to_rgba(ring_sizes))
+
+    cmapper = cm.ScalarMappable(
+        norm=colors.Normalize(vmin=3, vmax=10, clip=True), cmap="coolwarm"
+    )
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+
+    cbar = fig.colorbar(cmapper, cax=cax)
+    cbar.ax.set_ylabel("Ring Size", rotation=270)
+
+    ring_colors = cmapper.to_rgba([ring_sizes[x] for x in all_xs])
+    ax.vlines(all_xs, all_ymins, all_ymaxs, colors=ring_colors)
     ax.set_ylabel("Time / microsecond")
-    # ax.set_ylim(0, 110)
+    ax.set_ylim(0, 200)
+    ax.axhline(100.0, color="black", linestyle="dotted")
+
+    # Find the index of the ring that was first born after
+    # the mode switch by starting at the end
+    # and working backwardss
+    first_born_after = all_ymins.shape[0] - 1
+    while all_ymins[first_born_after] >= 100.0:
+        first_born_after -= 1
+    ax.axvline(all_xs[first_born_after], color="black", linestyle="dotted")
+
     ax.set_xlabel("Ring ID")
     ax.set_xlim(0, existence_matrix.shape[0])
-    fig.savefig("./lifetimes.pdf")
+    return ax
 
+def write_output_files(output_files, universe, graph, ring_finder):
+    """
+    Write a series of useful outputs to files.
+
+    Parameters
+    ----------
+    output_files
+        Output file caching object
+    universe
+        The MDA universe we're looking at
+    graph
+        The edge graph we have analysed
+    ring_finder
+        The ring finder, already run on graph
+    """
+    output_files.write_coordinations(universe.trajectory.time, graph)
+    output_files.write_areas(
+        universe.trajectory.time, ring_finder.current_rings
+    )
+    output_files.write_sizes(
+        universe.trajectory.time, ring_finder.current_rings
+    )
+    output_files.write_regularity(
+        universe.trajectory.time, ring_finder.current_rings
+    )
+
+    output_files.write_maximum_entropy(
+        universe.trajectory.time, ring_finder.current_rings
+    )
+    output_files.write_edge_lengths(
+        universe.trajectory.time, ring_finder.analyse_edges()
+    )
+    try:
+        ring_graph = convert_to_ring_graph(ring_finder.current_rings)
+        assortativity = nx.numeric_assortativity_coefficient(ring_graph, "size")
+    except ValueError:
+        assortativity = np.nan
+    output_files.write_assortativity(universe.trajectory.time, assortativity)
+
+def main():
+    # Parsing section -- read the files, and split the atoms
+    # and molecules into a few types. This could probably
+    # be neatened with more use of MDA.
+    if len(sys.argv) == 4:
+        position_file = sys.argv[1]
+        topology_file = sys.argv[2]
+        output_prefix = sys.argv[3]
+    else:
+        topology_file = "./polymer_total.data"
+        output_prefix = "./test"
+        position_file = "output-equilibrate.lammpstrj"
+
+    universe = mda.Universe(
+        topology_file,
+        ["output-assembly.lammpstrj", "output-stretch.lammpstrj"],
+        format="LAMMPSDUMP",
+        dt=0.001 * 20000,
+    )
+    _, _, atoms, molecs, bonds, _ = parse_molecule_topology(topology_file)
+    bonds = [val["atoms"] for _, val in bonds.items()]
+    total_graph = nx.Graph()
+    total_graph.add_edges_from(bonds)
+
+    bond_molecs = {}
+    for u, v in bonds:
+        molec_u, molec_v = atoms[u]["molec"], atoms[v]["molec"]
+        assert molec_u == molec_v, "Bonded atoms must be in same molecule"
+        bond_molecs[u, v] = molec_u
+    nx.set_edge_attributes(total_graph, bond_molecs, name="molec")
+
+    atom_types = {atom_id: atom["type"] for atom_id, atom in atoms.items()}
+    nx.set_node_attributes(total_graph, atom_types, name="atom_types")
+    molec_types = {atom_id: atom["molec"] for atom_id, atom in atoms.items()}
+
+    nx.set_node_attributes(total_graph, molec_types, name="molec")
+    ring_trajectory, graph_trajectory, bond_trajectory = [], [], []
+    output_files = AnalysisFiles(output_prefix)
+    for timestep in universe.trajectory[::STEP_SIZE]:
+        print(timestep, "out of", len(universe.trajectory), timestep.time)
+        periodic_box = np.array(
+            [[0, timestep.dimensions[0]], [0, timestep.dimensions[1]]]
+        )
+        # find the terminal atoms, and group them into clusters.
+        all_atoms = universe.select_atoms("all")
+        all_atoms.positions -= np.min(all_atoms.positions, axis=0)
+        terminals = universe.select_atoms("type 2 or type 3")
+        terminal_pairs = find_lj_pairs(
+            terminals.positions, terminals.ids, LJ_BOND, cell=periodic_box
+        )
+        terminal_clusters = find_lj_clusters(terminal_pairs)
+
+        broken_bonds_step = find_broken_bonds(bonds, all_atoms.positions, periodic_box)
+        if not bond_trajectory:
+            bond_trajectory = [frozenset(broken_bonds_step)]
+        else:
+            bond_trajectory.append(frozenset(bond_trajectory[-1].union(broken_bonds_step)))
+
+        # Now remove those edges from the in_graph
+        total_graph.remove_edges_from([(u, v) for u, v in bond_trajectory[-1]])
+
+        body_clusters = [
+            frozenset([item]) for item in universe.select_atoms("type 4").ids
+        ]
+        all_clusters = sorted(list(terminal_clusters.union(body_clusters)))
+        # sort the list of clusters into a consistent list so
+        # we can index them.
+        cluster_positions = find_cluster_centres(
+            all_clusters, all_atoms.positions, cutoff=50.0
+        )
+
+        ring_finder_successful = True
+        try:
+            G = connect_clusters(in_graph=total_graph, clusters=all_clusters)
+            nx.set_node_attributes(G, cluster_positions, "pos")
+            colours = dict()
+            for i, cluster in enumerate(all_clusters):
+                cluster_atom_types = [universe.atoms[atom - 1].type for atom in cluster]
+                modal_type = Counter(cluster_atom_types).most_common(1)[0][0]
+                colours[i] = (int(modal_type),)
+            nx.set_node_attributes(G, colours, name="color")
+
+            ring_finder = PeriodicRingFinder(G, cluster_positions, periodic_box)
+            # Convert each ring into atoms which have a persistent ID
+            # between steps
+            graph_trajectory.append(G)
+            ring_trajectory.append(ring_finder.current_rings)
+        except RingFinderError as ex:
+            print("failed with code: ", ex)
+            ring_finder_successful = False
+            graph_trajectory.append(G)
+            ring_trajectory.append([])
+        except ValueError as ex:
+            print("failed with value code: ", ex)
+            ring_finder_successful = False
+            graph_trajectory.append(G)
+            ring_trajectory.append([])
+        except nx.exception.NetworkXError as ex:
+            print("Failed with networkx error: ", ex)
+            ring_finder_successful = False
+            graph_trajectory.append(G)
+            ring_trajectory.append([])
+        except RuntimeError as ex:
+            print("failed with RuntimeError: ", ex)
+            ring_finder_successful = False
+            graph_trajectory.append(G)
+            ring_trajectory.append([])
+        if ring_finder_successful:
+            #fig, ax = plt.subplots()
+            #draw_rings(ring_finder, timestep, G, ax=ax)
+            #fig.savefig(f"{output_prefix}_{timestep.time}.pdf")
+            #plt.close(fig)
+
+            write_output_files(output_files, universe, G, ring_finder)
+
+    output_files.flush()
+    existence_matrix, ring_sizes = calculate_existence_matrix(
+        ring_trajectory, graph_trajectory, atoms
+    )
+
+    births, deaths = [], []
+    lifespans = defaultdict(list)
+    for i in range(existence_matrix.shape[0]):
+        is_true = np.where(existence_matrix[i, :])[0]
+        births.append(np.min(is_true) * STEP_SIZE * DT * 1e-3)
+        deaths.append(np.max(is_true) * STEP_SIZE * DT * 1e-3)
+        lifespans[ring_sizes[i]].append(
+            np.sum(is_true) * STEP_SIZE * DT * 1e-3
+        )
+
+    fig, ax = plt.subplots()
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cmapper = cm.ScalarMappable(
+        norm=colors.Normalize(vmin=3, vmax=10, clip=True), cmap="coolwarm"
+    )
+    ax.scatter(births, deaths, c=cmapper.to_rgba(ring_sizes))
+    ax.axvline(100.0, linestyle="dotted", color="black")
+    ax.axhline(100.0, linestyle="dotted", color="black")
+    ax.set_xlim(0, 200)
+    ax.set_ylim(0, 200)
+    cbar = fig.colorbar(cmapper, cax=cax)
+    cbar.ax.set_ylabel("Ring Size", rotation=270)
+    ax.set_xlabel("Birth / microsecond")
+    ax.set_ylabel("Death / microsecond")
+    fig.savefig("birth-death.pdf")
+    plt.close(fig)
+
+    ring_size_list = list(range(min(lifespans.keys()), max(lifespans.keys())))
+    fig, ax = plt.subplots()
+    mean_lifespans = [np.nanmean(lifespans[ring_size]) for ring_size in ring_size_list]
+    std_lifespans = [
+        np.nanstd(lifespans[ring_size], ddof=1) for ring_size in ring_size_list
+    ]
+    ax.errorbar(ring_size_list, mean_lifespans, std_lifespans)
+    ax.set_ylabel("Lifespan / microsecond")
+    ax.set_xlabel("Ring Size")
+    ax.set_ylim(0, np.nanmax(mean_lifespans)+np.nanmax(std_lifespans))
+    ax.set_xlim(0, np.max(ring_size_list))
+    fig.savefig("./lifespan.pdf")
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    plot_lifetimes(existence_matrix, ring_sizes, fig=fig, ax=ax)
+    fig.savefig("lifetimes.pdf")
+    plt.close(fig)
 
 if __name__ == "__main__":
     main()

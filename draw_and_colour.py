@@ -7,7 +7,7 @@ Created on Mon Apr 12 13:59:05 2021
 """
 
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, Optional
 import networkx as nx
 import numpy as np
 
@@ -59,8 +59,8 @@ def colour_graph(graph: nx.Graph, colour_to_type: Dict = COLOUR_TO_TYPE) -> nx.G
 
 def draw_periodic_coloured(
     graph: nx.Graph,
-    pos: Dict[int, np.array],
     periodic_box: np.array,
+    pos: Optional[Dict[int, np.array]] = None,
     ax=None,
     with_labels=False,
     **kwargs,
@@ -84,6 +84,9 @@ def draw_periodic_coloured(
     """
     if ax is None:
         _, ax = plt.subplots()
+    if pos is None:
+        pos = nx.get_node_attributes(graph, "pos")
+
     edge_list = []
     periodic_edge_list = []
     for u, v in graph.edges():
