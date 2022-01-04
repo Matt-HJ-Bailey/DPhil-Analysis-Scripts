@@ -17,6 +17,9 @@ import matplotlib.colors as colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.patheffects as path_effects
 
+from scipy.spatial import distance
+from scipy.spatial.distance import pdist, squareform
+
 import MDAnalysis as mda
 import networkx as nx
 import numpy as np
@@ -37,9 +40,53 @@ from analysis_files import AnalysisFiles
 
 LJ_BOND = 137.5
 FIND_BODIES = True
-STEP_SIZE = 5
-DT = 0.001 * 10000
+STEP_SIZE = 1000
+DT = 0.001 * 20000
 
+def bootstrap(arr: np.ndarray, samples=10, lo=2.5, hi=97.5, seed=None):
+    """
+    Calculate the bootstrap confidence interval for this array.
+    """
+    means = np.empty([samples], dtype=float)
+    rng = np.random.default_rng(seed=seed)
+    for idx in range(samples):    
+        data = rng.choice(arr, size=arr.shape, replace=True)
+        means[idx] = np.mean(data)
+    return np.percentile(means, [lo, hi])
+    
+def calculate_roughness(positions: np.ndarray,
+                        periodic_cell: np.ndarray,
+                        bins=100):
+    """
+    Calculate a roughness coefficient 
+    """
+    x_mic = (periodic_cell[0, 1] - periodic_cell[0, 0])/2
+    y_mic = (periodic_cell[1, 1] - periodic_cell[1, 0])/2
+    z_mic = (periodic_cell[2, 1] - periodic_cell[2, 0])/2
+    
+    x_seps = squareform(pdist(positions[:, 0].reshape(-1, 1)))
+    y_seps = squareform(pdist(positions[:, 1].reshape(-1, 1)))
+    z_seps = squareform(pdist(positions[:, 2].reshape(-1, 1)))
+    
+    x_seps[x_seps > x_mic] -= x_mic
+    x_seps[x_seps < -x_mic] += x_mic
+    y_seps[y_seps > y_mic] -= y_mic
+    y_seps[y_seps < -y_mic] += y_mic
+    z_seps[z_seps > z_mic] -= z_mic
+    z_seps[z_seps < -z_mic] += z_mic
+    
+    linear_distances = np.sqrt(x_seps**2 + y_seps**2)
+    # Now need to separate into bins 
+    bin_edges = np.linspace(np.min(linear_distances), np.max(linear_distances), num=bins)
+    bins = [(bin_edges[i], bin_edges[i+1]) for i in range(bins - 1)]
+    hist = np.zeros_like(bin_edges)
+    hist_lo = np.zeros_like(bin_edges)
+    hist_hi = np.zeros_like(bin_edges)
+    for idx, (lo, hi) in enumerate(bins):
+        mask = np.logical_and(linear_distances >= lo, linear_distances < hi)
+        hist[idx] = np.mean(z_seps[mask])
+        hist_lo[idx], hist_hi[idx] = bootstrap(z_seps[mask].ravel())
+    return bin_edges, hist, hist_lo, hist_hi
 
 def calculate_existence_matrix(
     ring_trajectory: Iterable[Iterable[Any]],
@@ -147,7 +194,7 @@ def find_broken_bonds(bonds: Iterable[Tuple[int, int]],
     """
     broken_bonds = []
     for u, v in bonds:
-        x_mic, y_mic = periodic_box[:, 1] / 2
+        x_mic, y_mic, z_mic = periodic_box[:, 1] / 2
         # -1 is for LAMMPS offset
         bond_vec = positions[u - 1, :] - positions[v - 1, :]
         bond_vec = apply_minimum_image_convention(bond_vec, x_mic, y_mic)
@@ -186,22 +233,22 @@ def draw_rings(ring_finder, timestep, graph, ax=None):
         periodic_box=np.array([[0, timestep.dimensions[0]], [0, timestep.dimensions[1]]]),
         ax=ax
     )
-    for node, data in graph.nodes(data=True):
-        text = ax.text(
-            data["pos"][0],
-            data["pos"][1],
-            ",".join(str(item) for item in data["molec"]),
-            horizontalalignment="center",
-            verticalalignment="center",
-            color="white",
-            fontsize=6,
-        )
-        text.set_path_effects(
-            [
-                path_effects.Stroke(linewidth=1, foreground="black"),
-                path_effects.Normal(),
-            ]
-        )
+    #for node, data in graph.nodes(data=True):
+    #    text = ax.text(
+    #        data["pos"][0],
+    #        data["pos"][1],
+    #        ",".join(str(item) for item in data["molec"]),
+    #        horizontalalignment="center",
+    #        verticalalignment="center",
+    #        color="white",
+    #        fontsize=6,
+    #    )
+    #    text.set_path_effects(
+    #        [
+    #            path_effects.Stroke(linewidth=1, foreground="black"),
+    #            path_effects.Normal(),
+    #        ]
+    #    )
 
     ax.axis("off")
 
@@ -394,14 +441,29 @@ def main():
     for timestep in universe.trajectory[::STEP_SIZE]:
         print(timestep, "out of", len(universe.trajectory), timestep.time)
         periodic_box = np.array(
-            [[0, timestep.dimensions[0]], [0, timestep.dimensions[1]]]
+            [[0, timestep.dimensions[0]],
+             [0, timestep.dimensions[1]],
+             [0, timestep.dimensions[2]]]
         )
         # find the terminal atoms, and group them into clusters.
         all_atoms = universe.select_atoms("all")
         all_atoms.positions -= np.min(all_atoms.positions, axis=0)
+        
+        bin_edges, hist, hist_lo, hist_hi = calculate_roughness(all_atoms.positions, periodic_box)
+        
+        fig, ax = plt.subplots()
+        ax.plot(bin_edges, hist)
+        ax.fill_between(bin_edges, hist_lo, hist_hi, alpha=0.6)
+        ax.set_xlim(0, 2100)
+        ax.set_xlabel("Separation")
+        ax.set_ylim(0, 150)
+        ax.set_ylabel("Roughness")
+        fig.savefig(f"./roughness-{timestep.time}.pdf")
+        plt.close(fig)
+        
         terminals = universe.select_atoms("type 2 or type 3")
         terminal_pairs = find_lj_pairs(
-            terminals.positions, terminals.ids, LJ_BOND, cell=periodic_box
+            terminals.positions, terminals.ids, LJ_BOND, cell=periodic_box[:2, :]
         )
         terminal_clusters = find_lj_clusters(terminal_pairs)
 
@@ -435,7 +497,7 @@ def main():
                 colours[i] = (int(modal_type),)
             nx.set_node_attributes(G, colours, name="color")
 
-            ring_finder = PeriodicRingFinder(G, cluster_positions, periodic_box)
+            ring_finder = PeriodicRingFinder(G, cluster_positions, periodic_box[:2, :])
             # Convert each ring into atoms which have a persistent ID
             # between steps
             graph_trajectory.append(copy.deepcopy(G))
@@ -461,10 +523,10 @@ def main():
             graph_trajectory.append(copy.deepcopy(G))
             ring_trajectory.append([])
         if ring_finder_successful:
-            #fig, ax = plt.subplots()
-            #draw_rings(ring_finder, timestep, G, ax=ax)
-            #fig.savefig(f"{output_prefix}_{timestep.time}.pdf")
-            #plt.close(fig)
+            fig, ax = plt.subplots()
+            draw_rings(ring_finder, timestep, G, ax=ax)
+            fig.savefig(f"{output_prefix}_{timestep.time}.pdf")
+            plt.close(fig)
 
             write_output_files(output_files, universe, G, ring_finder)
 
