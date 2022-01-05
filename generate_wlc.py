@@ -25,8 +25,8 @@ STD_LENGTH = 0
 SEGMENT_LENGTH = 50.0
 DEFAULT_STICKY_FRACTION = None
 MIN_SIZE = 3
-NUM_X = 10
-NUM_Y = 10
+NUM_X = 5
+NUM_Y = 5
 
 LINE_GRAPH = nx.path_graph(MEAN_LENGTH)
 TRIANGLE_GRAPH = nx.Graph()
@@ -55,8 +55,34 @@ DOUBLE_TRIANGLE_GRAPH.add_edges_from(
     ]
 )
 
-GRAPHS = [LINE_GRAPH, TRIANGLE_GRAPH, DOUBLE_TRIANGLE_GRAPH]
-DEFAULT_WEIGHTS = [1.0, 0.5, 0.5]
+CROSS_GRAPH = nx.Graph()
+CROSS_GRAPH.add_edges_from(
+    [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (4, 5),
+        (0, 6),
+        (6, 7),
+        (7, 8),
+        (8, 9),
+        (9, 10),
+        (0, 11),
+        (11, 12),
+        (12, 13),
+        (13, 14),
+        (14, 15),
+        (0, 16),
+        (16, 17),
+        (17, 18),
+        (18, 19),
+        (19, 20),
+    ]
+)
+
+GRAPHS = [LINE_GRAPH, TRIANGLE_GRAPH, DOUBLE_TRIANGLE_GRAPH, CROSS_GRAPH]
+DEFAULT_WEIGHTS = [0.0, 0.0, 0.0, 1.0]
 
 
 def get_neighbours_of(x, y, num_x, num_y):
