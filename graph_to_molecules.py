@@ -403,7 +403,7 @@ if __name__ == "__main__":
         {"end_size": 0.8 * 50, "linewidths": 0, "colors": "black"}
         for _ in range(len(CURVES))
     ]
-    rotate_one_curve(CURVES, 0, np.pi / 2.0, correct_com=True)
+    # rotate_one_curve(CURVES, 0, np.pi / 2.0, correct_com=True)
     CURVES.plot_onto(AX, kwarg_list, label_nodes=False)
     AX.set_axis_off()
 
