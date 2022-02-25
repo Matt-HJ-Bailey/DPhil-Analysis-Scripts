@@ -293,7 +293,7 @@ def calculate_graph_energy(
     return energy, -forces.ravel()
 
 
-def optimise_graph_positions(G: nx.Graph, periodic_cell: Optional[np.array] = None):
+def optimise_graph_positions(G: nx.Graph, periodic_cell: Optional[np.array] = None, do_angles=False):
     """
     Move the nodes in this graph to optimise the energy.
 
@@ -319,7 +319,7 @@ def optimise_graph_positions(G: nx.Graph, periodic_cell: Optional[np.array] = No
     res = scipy.optimize.minimize(
         x0=np.ravel(positions),
         fun=calculate_graph_energy,
-        args=(G, periodic_cell, False),
+        args=(G, periodic_cell, do_angles),
         jac=True,
     )
 
