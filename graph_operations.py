@@ -545,12 +545,7 @@ def main():
 
     G = hexagonal_lattice_graph(num_nodes, num_nodes, periodic=True)
     G = nx.relabel.convert_node_labels_to_integers(G)
-    periodic_cell = np.array(
-        [
-            [0.0, 1.5 * num_nodes],
-            [0.0, num_nodes * np.sqrt(3)],
-        ]
-    )
+    periodic_cell = np.array([[0.0, 1.5 * num_nodes], [0.0, num_nodes * np.sqrt(3)],])
 
     if len(sys.argv) >= 3:
         num_edges_to_remove = int(sys.argv[2])
