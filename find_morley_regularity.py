@@ -11,18 +11,28 @@ import numpy as np
 import scipy.spatial
 from collections import defaultdict
 import pandas as pd
+import networkx as nx
+from draw_and_colour import draw_periodic_coloured, to_tikz, colour_graph
+from rings import PeriodicRingFinder
 
 from matplotlib.collections import LineCollection, PolyCollection
 import matplotlib.pyplot as plt
 
-DO_PLOTS = False
+DO_PLOTS = True
 class Shape:
-    def __init__(self, coords):
+    def __init__(self, coords, indices):
         self.coords = coords
         self.hull = scipy.spatial.ConvexHull(self.coords)
+        self.indices = indices
+        
+    def to_node_list(self):
+        return self.indices
+        
+    def edges(self):
+        return [(self.indices[i], self.indices[(i + 1) % len(self.indices)]) for i in range(len(self.indices))]
         
     def balanced_repartition(self) -> float:
-        stds = np.std(self.coords, axis=1, ddof=1)
+        stds = np.std(self.coords, axis=0, ddof=1)
         return min(np.sqrt(np.min(stds) / np.max(stds)), 1.0)
 
     def area(self) -> float:
@@ -72,6 +82,19 @@ def fix_shape_pb(shape_coords, periodic_cell):
                 
     return shape_coords
 
+
+def bootstrap(arr: np.ndarray, samples=100, lo=2.5, hi=97.5, seed=None):
+    """
+    Calculate the bootstrap confidence interval for this array.
+    """
+    arr = np.asarray(arr)
+    means = np.empty([samples], dtype=float)
+    rng = np.random.default_rng(seed=seed)
+    for idx in range(samples):    
+        data = rng.choice(arr, size=arr.shape, replace=True)
+        means[idx] = np.mean(data)
+    return np.percentile(means, [lo, hi])
+    
 def find_morley_rings(prefix: str):
     with open(f"{prefix}_A_aux.dat", "r") as fi:
         _ = fi.readline()
@@ -83,9 +106,8 @@ def find_morley_rings(prefix: str):
     coords = []
     with open(f"{prefix}_A_crds.dat", "r") as fi:
         for line in fi:
-            coords.append([float(item) for item in line.split()])
-    coords = np.asarray(coords)
-    
+            coords.append(np.array([float(item) for item in line.split()]))
+    coords = np.vstack(coords)
     edges = []
     with open(f"{prefix}_A_net.dat", "r") as fi:
         for idx, line in enumerate(fi.readlines()):
@@ -100,9 +122,8 @@ def find_morley_rings(prefix: str):
             if len(ring) >= 2:
                 shape_coords = np.array([coords[idx] for idx in ring])
                 shape_coords = fix_shape_pb(shape_coords, periodic_cell)
-                shapes.append(Shape(shape_coords))
-    return shapes
-    
+                shapes.append(Shape(shape_coords, indices=ring))
+    return shapes, periodic_cell
 
 def find_job_directory(directory):
     for subdir in os.listdir(directory):
@@ -115,56 +136,53 @@ def find_job_directory(directory):
     return None
                 
 
-def find_repeats(prefix: str, temperature: str):
-    return glob.glob(f"{prefix}_{temperature}_*/")
+def find_repeats(prefix: str, bond: str, angle: str):
+    return glob.glob(f"{prefix}_{bond}_{angle}_*/")
 
 def main():
-    for temperature in ["-2.00", "-2.50", "-3.00", "-3.50", "-4.00", "-5.00"]:
-        shapes = []
-        for idx, repeat in enumerate(find_repeats("./MINT", temperature)):
-            
-            job_dir = find_job_directory(repeat)
-            if job_dir is None:
-                continue
-            try:
-                found_shapes = find_morley_rings(os.path.join(job_dir, f"out_{temperature}"))
-                shapes.extend(found_shapes)
-            except FileNotFoundError:
-                continue
-            
-            if DO_PLOTS:
-                fig, ax = plt.subplots()
-                pc = PolyCollection([shape.coords for shape in found_shapes])
-                pc.set_array([len(shape) for shape in found_shapes])
-                ax.add_collection(pc)
+    for bond in ["0.01", "1", "10", "100"]:
+        for angle in ["0.01", "1", "10", "100"]:
+            shapes = []
+            for idx, repeat in enumerate(find_repeats("./NTMC", bond, angle), 1):
+                print(idx, repeat)
+                job_dir = find_job_directory(repeat)
+                if job_dir is None:
+                    continue
+                try:
+                    found_shapes, periodic_cell = find_morley_rings(os.path.join(job_dir, f"out_{bond}_{angle}"))
+                    srcs = [shape.src() for shape in found_shapes]
+                    print(repeat, np.mean(srcs), np.mean(np.abs(bootstrap(srcs) - np.mean(srcs))))
+                    shapes.extend(found_shapes)
+                except FileNotFoundError:
+                    continue
                 
-                lc = LineCollection(segments=[[np.array([x, y]) for (x, y) in shape.coords] + [(shape.coords[0, 0], shape.coords[0, 1])]
-                                              for shape in found_shapes],
-                                    colors="black")
-                ax.add_collection(lc)
+                G = nx.Graph()
+                pos_dict = {}
+                for shape in found_shapes:
+                    G.add_edges_from(shape.edges())
+                    for n_idx, node in enumerate(shape.indices):
+                        pos_dict[node] = np.array(shape.coords[n_idx, :])
+                G = colour_graph(G)
+                nx.set_node_attributes(G, pos_dict, "pos")
                 
-                ax.set_xlim(-5, 60)
-                ax.set_ylim(-5, 55)
-                ax.axis("off")
-                fig.savefig(f"./Figures/MINT_{temperature}_{idx}.pdf")
-                plt.close(fig)
-        
-        
-        br_dict = defaultdict(list)
-        solidity_dict = defaultdict(list)
-        convexity_dict = defaultdict(list)
-        src_dict = defaultdict(list)
-        for shape in shapes:
-            br_dict[len(shape)].append(shape.balanced_repartition())
-            solidity_dict[len(shape)].append(shape.solidity())
-            convexity_dict[len(shape)].append(shape.convexity())
-            src_dict[len(shape)].append(shape.src())
-        ring_sizes = list(range(3, 21))
-        df = pd.DataFrame({"ring_sizes": ring_sizes,
-                           "convexities": [np.mean(convexity_dict[ring_size]) for ring_size in ring_sizes],
-                           "solidities": [np.mean(solidity_dict[ring_size]) for ring_size in ring_sizes],
-                           "balanced_repartitions": [np.mean(br_dict[ring_size]) for ring_size in ring_sizes],
-                           "srcs": [np.mean(src_dict[ring_size]) for ring_size in ring_sizes]})
-        df.to_csv(f"./Results/shapestats-{temperature}.csv", index=False)
+                to_tikz(filename=f"./Figures/NETMC_{bond}_{angle}_{idx}.tex", graph=G, rings=found_shapes, periodic_box=periodic_cell, pos=pos_dict, vmin=0.5, vmax=1, cmap="coolwarm_r", colour_lut=10)
+            
+            
+            br_dict = defaultdict(list)
+            solidity_dict = defaultdict(list)
+            convexity_dict = defaultdict(list)
+            src_dict = defaultdict(list)
+            for shape in shapes:
+                br_dict[len(shape)].append(shape.balanced_repartition())
+                solidity_dict[len(shape)].append(shape.solidity())
+                convexity_dict[len(shape)].append(shape.convexity())
+                src_dict[len(shape)].append(shape.src())
+            ring_sizes = list(range(3, 21))
+            df = pd.DataFrame({"ring_sizes": ring_sizes,
+                               "convexities": [np.mean(convexity_dict[ring_size]) for ring_size in ring_sizes],
+                               "solidities": [np.mean(solidity_dict[ring_size]) for ring_size in ring_sizes],
+                               "balanced_repartitions": [np.mean(br_dict[ring_size]) for ring_size in ring_sizes],
+                               "srcs": [np.mean(src_dict[ring_size]) for ring_size in ring_sizes]})
+            df.to_csv(f"./Results/shapestats-{bond}-{angle}.csv", index=False)
 if __name__ == "__main__":
     main()

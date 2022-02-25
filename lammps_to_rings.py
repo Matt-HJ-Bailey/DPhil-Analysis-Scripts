@@ -31,7 +31,7 @@ from clustering import (
     find_lj_clusters,
     find_cluster_centres,
     connect_clusters,
-    apply_minimum_image_convention
+    apply_minimum_image_convention,
 )
 from lammps_parser import parse_molecule_topology
 from rings.periodic_ring_finder import PeriodicRingFinder
@@ -45,60 +45,66 @@ FIND_BODIES = True
 STEP_SIZE = 250
 DT = 0.001 * 50000 * 1e-3
 
+
 def bootstrap(arr: np.ndarray, samples=10, lo=2.5, hi=97.5, seed=None):
     """
     Calculate the bootstrap confidence interval for this array.
     """
     means = np.empty([samples], dtype=float)
     rng = np.random.default_rng(seed=seed)
-    for idx in range(samples):    
+    for idx in range(samples):
         data = rng.choice(arr, size=arr.shape, replace=True)
         means[idx] = np.mean(data)
     return np.percentile(means, [lo, hi])
-    
-def calculate_roughness(positions: np.ndarray,
-                        periodic_cell: np.ndarray,
-                        bins=100):
+
+
+def calculate_roughness(positions: np.ndarray, periodic_cell: np.ndarray, bins=100):
     """
     Calculate a roughness coefficient 
     """
-    x_mic = (periodic_cell[0, 1] - periodic_cell[0, 0])/2
-    y_mic = (periodic_cell[1, 1] - periodic_cell[1, 0])/2
-    z_mic = (periodic_cell[2, 1] - periodic_cell[2, 0])/2
-    
+    x_mic = (periodic_cell[0, 1] - periodic_cell[0, 0]) / 2
+    y_mic = (periodic_cell[1, 1] - periodic_cell[1, 0]) / 2
+    z_mic = (periodic_cell[2, 1] - periodic_cell[2, 0]) / 2
+
     x_seps = squareform(pdist(positions[:, 0].reshape(-1, 1)))
     y_seps = squareform(pdist(positions[:, 1].reshape(-1, 1)))
-    z_seps = squareform(pdist(positions[:, 2].reshape(-1, 1)), 'sqeuclidean')
-    
+    z_seps = squareform(pdist(positions[:, 2].reshape(-1, 1)), "sqeuclidean")
+
     x_seps[x_seps > x_mic] -= 2 * x_mic
     x_seps[x_seps < -x_mic] += 2 * x_mic
     y_seps[y_seps > y_mic] -= 2 * y_mic
     y_seps[y_seps < -y_mic] += 2 * y_mic
     z_seps[z_seps > z_mic] -= 2 * z_mic
     z_seps[z_seps < -z_mic] += 2 * z_mic
-    
-    linear_distances = np.sqrt(x_seps**2 + y_seps**2)
-    # Now need to separate into bins 
+
+    linear_distances = np.sqrt(x_seps ** 2 + y_seps ** 2)
+    # Now need to separate into bins
     bin_edges = np.linspace(0.0, 2000, num=bins)
-    bins = [(bin_edges[i], bin_edges[i+1]) for i in range(bins - 1)]
-    hist, hist_lo, hist_hi = np.empty_like(bin_edges), np.empty_like(bin_edges), np.empty_like(bin_edges)
+    bins = [(bin_edges[i], bin_edges[i + 1]) for i in range(bins - 1)]
+    hist, hist_lo, hist_hi = (
+        np.empty_like(bin_edges),
+        np.empty_like(bin_edges),
+        np.empty_like(bin_edges),
+    )
     hist[:], hist_lo[:], hist_hi[:] = np.nan, np.nan, np.nan
-    
+
     for idx, (lo, hi) in enumerate(bins):
         mask = np.logical_and(linear_distances >= lo, linear_distances < hi)
         if np.any(mask):
             hist[idx] = np.mean(z_seps[mask])
             hist_lo[idx], hist_hi[idx] = bootstrap(z_seps[mask].ravel())
-    
+
     mask = np.logical_and(~np.isnan(hist), ~np.isnan(hist_lo), ~np.isnan(hist_hi))
     return bin_edges[mask], hist[mask], hist_lo[mask], hist_hi[mask]
 
+
 def roughness_func(rs, alpha, w, xi):
     predicted = np.empty_like(rs)
-    predicted[rs < xi] = 2.0 * w**2 * (rs[rs < xi] / xi)**(2*alpha)
-    predicted[rs >= xi] = 2.0 * w**2
+    predicted[rs < xi] = 2.0 * w ** 2 * (rs[rs < xi] / xi) ** (2 * alpha)
+    predicted[rs >= xi] = 2.0 * w ** 2
     return predicted
-        
+
+
 def analyse_roughness(bin_edges, hist):
     """
     Calculate the three critical roughness parameters
@@ -116,26 +122,29 @@ def analyse_roughness(bin_edges, hist):
         xi is the local roughness length scale
         w is the width of the surface
     """
-    
+
     size = bin_edges.shape[0]
     lo_idx = int(size * 0.25)
     hi_idx = int(size * 0.75)
-    
+
     width = np.mean(hist[lo_idx:hi_idx])
-    
+
     first_above_width = np.argmax(hist > width)
-    
+
     xi = bin_edges[first_above_width]
-    
+
     w = np.sqrt(width / 2.0)
-    res = scipy.optimize.minimize(lambda xs: np.sum((hist - roughness_func(rs=bin_edges, alpha=xs[0], w=xs[1], xi=xs[2]))**2), x0=[0.5, w, xi],
-    bounds=[
-        (0.0, 1.0),
-        (0.8 * w, 1.2 * w),
-        (0.5 * xi, 1.5 * xi)])
+    res = scipy.optimize.minimize(
+        lambda xs: np.sum(
+            (hist - roughness_func(rs=bin_edges, alpha=xs[0], w=xs[1], xi=xs[2])) ** 2
+        ),
+        x0=[0.5, w, xi],
+        bounds=[(0.0, 1.0), (0.8 * w, 1.2 * w), (0.5 * xi, 1.5 * xi)],
+    )
     alpha, width, xi = res.x
-    
+
     return alpha, width, xi
+
 
 def calculate_existence_matrix(
     ring_trajectory: Iterable[Iterable[Any]],
@@ -161,8 +170,10 @@ def calculate_existence_matrix(
     np.ndarray
         The sizes of each unique ring
     """
-    assert len(ring_trajectory) == len(graph_trajectory), f"Ring trajectory {len(ring_trajectory)}" +\
-        "and graph trajectory {len(graph_trajectory)} must have the same size."
+    assert len(ring_trajectory) == len(graph_trajectory), (
+        f"Ring trajectory {len(ring_trajectory)}"
+        + "and graph trajectory {len(graph_trajectory)} must have the same size."
+    )
     # Find all unique rings
     molecs_trajectory = []
     ring_sizes = {}
@@ -218,9 +229,9 @@ def shape_to_molecs(shape, graph):
     return molecs_in_shape
 
 
-def find_broken_bonds(bonds: Iterable[Tuple[int, int]],
-                      positions: np.ndarray,
-                      periodic_box: np.ndarray) -> Set[Set[int]]:
+def find_broken_bonds(
+    bonds: Iterable[Tuple[int, int]], positions: np.ndarray, periodic_box: np.ndarray
+) -> Set[Set[int]]:
     """
     Find which bonds have been broken this step.
 
@@ -273,16 +284,16 @@ def draw_rings(ring_finder, timestep, graph, ax=None):
 
     ax.set_xlim(0, timestep.dimensions[0])
     ax.set_ylim(0, timestep.dimensions[1])
-    ring_finder.draw_onto(
-        ax, cmap_name="tab20b", min_ring_size=4, max_ring_size=30
-    )
+    ring_finder.draw_onto(ax, cmap_name="tab20b", min_ring_size=4, max_ring_size=30)
 
     draw_periodic_coloured(
         graph,
-        periodic_box=np.array([[0, timestep.dimensions[0]], [0, timestep.dimensions[1]]]),
-        ax=ax
+        periodic_box=np.array(
+            [[0, timestep.dimensions[0]], [0, timestep.dimensions[1]]]
+        ),
+        ax=ax,
     )
-    #for node, data in graph.nodes(data=True):
+    # for node, data in graph.nodes(data=True):
     #    text = ax.text(
     #        data["pos"][0],
     #        data["pos"][1],
@@ -362,7 +373,10 @@ def plot_lifetimes(existence_matrix, ring_sizes, fig=None, ax=None):
         highest_ymax = max([line[2] for line in lines_at_x])
         lowest_ymins.append((lines_at_x[0][0], lowest_ymin, highest_ymax))
 
-    ymins_sorting_arr = np.array([(item[1], item[2]) for item in lowest_ymins], dtype=[("ymin", float), ("ymax", float)])
+    ymins_sorting_arr = np.array(
+        [(item[1], item[2]) for item in lowest_ymins],
+        dtype=[("ymin", float), ("ymax", float)],
+    )
     # ymins_order = np.argsort([item[1] for item in lowest_ymins])
     ymins_order = np.argsort(ymins_sorting_arr, order=("ymin", "ymax"))
     xmapper = {old_idx: new_idx for new_idx, old_idx in enumerate(ymins_order)}
@@ -383,7 +397,7 @@ def plot_lifetimes(existence_matrix, ring_sizes, fig=None, ax=None):
     all_ymins = np.asarray(all_ymins)[x_order]
     all_ymaxs = np.asarray(all_ymaxs)[x_order]
     all_sizes = np.asarray(all_sizes)[x_order]
-    
+
     cmapper = cm.ScalarMappable(
         norm=colors.Normalize(vmin=3, vmax=20, clip=True), cmap="coolwarm"
     )
@@ -404,11 +418,12 @@ def plot_lifetimes(existence_matrix, ring_sizes, fig=None, ax=None):
     first_born_after = all_ymins.shape[0] - 1
     while all_ymins[first_born_after] >= 100.0:
         first_born_after -= 1
-    #ax.axvline(all_xs[first_born_after], color="black", linestyle="dotted")
+    # ax.axvline(all_xs[first_born_after], color="black", linestyle="dotted")
 
     ax.set_xlabel("Ring ID")
     ax.set_xlim(0, existence_matrix.shape[0])
     return ax
+
 
 def write_output_files(output_files, universe, graph, ring_finder):
     """
@@ -426,15 +441,9 @@ def write_output_files(output_files, universe, graph, ring_finder):
         The ring finder, already run on graph
     """
     output_files.write_coordinations(universe.trajectory.time, graph)
-    output_files.write_areas(
-        universe.trajectory.time, ring_finder.current_rings
-    )
-    output_files.write_sizes(
-        universe.trajectory.time, ring_finder.current_rings
-    )
-    output_files.write_regularity(
-        universe.trajectory.time, ring_finder.current_rings
-    )
+    output_files.write_areas(universe.trajectory.time, ring_finder.current_rings)
+    output_files.write_sizes(universe.trajectory.time, ring_finder.current_rings)
+    output_files.write_regularity(universe.trajectory.time, ring_finder.current_rings)
 
     output_files.write_maximum_entropy(
         universe.trajectory.time, ring_finder.current_rings
@@ -448,6 +457,7 @@ def write_output_files(output_files, universe, graph, ring_finder):
     except ValueError:
         assortativity = np.nan
     output_files.write_assortativity(universe.trajectory.time, assortativity)
+
 
 def main():
     # Parsing section -- read the files, and split the atoms
@@ -463,10 +473,7 @@ def main():
         output_prefix = "./test"
 
     universe = mda.Universe(
-        topology_file,
-        [position_file],
-        format="LAMMPSDUMP",
-        dt=0.001 * 10000,
+        topology_file, [position_file], format="LAMMPSDUMP", dt=0.001 * 10000,
     )
     _, _, atoms, molecs, bonds, _ = parse_molecule_topology(topology_file)
     bonds = [val["atoms"] for _, val in bonds.items()]
@@ -487,35 +494,48 @@ def main():
     nx.set_node_attributes(total_graph, molec_types, name="molec")
     ring_trajectory, graph_trajectory, bond_trajectory = [], [], []
     output_files = AnalysisFiles(output_prefix)
-    
+
     coeffs_dict = defaultdict(list)
     for timestep in universe.trajectory[::STEP_SIZE]:
         print(timestep, "out of", len(universe.trajectory), timestep.time)
         periodic_box = np.array(
-            [[0, timestep.dimensions[0]],
-             [0, timestep.dimensions[1]],
-             [0, timestep.dimensions[2]]]
+            [
+                [0, timestep.dimensions[0]],
+                [0, timestep.dimensions[1]],
+                [0, timestep.dimensions[2]],
+            ]
         )
         # find the terminal atoms, and group them into clusters.
         all_atoms = universe.select_atoms("all")
         all_atoms.positions -= np.min(all_atoms.positions, axis=0)
-        
-        bin_edges, hist, hist_lo, hist_hi = calculate_roughness(all_atoms.positions, periodic_box)
-        max_idx = int(0.8*bin_edges.shape[0])
+
+        bin_edges, hist, hist_lo, hist_hi = calculate_roughness(
+            all_atoms.positions, periodic_box
+        )
+        max_idx = int(0.8 * bin_edges.shape[0])
         alpha, width, xi = analyse_roughness(bin_edges[:max_idx], hist[:max_idx])
         coeffs_dict["alpha"].append(alpha)
         coeffs_dict["width"].append(width)
         coeffs_dict["xi"].append(xi)
-        coeffs_dict["time"].append(timestep.time*DT*STEP_SIZE)
-        temp_df = pd.DataFrame({"r":bin_edges, "H_mean": hist, "H_lo": hist_lo, "H_hi": hist_hi})
-        
-        temp_df.to_csv(f"./roughness-{int(timestep.time*DT*STEP_SIZE)}.csv", index=False)
-        
+        coeffs_dict["time"].append(timestep.time * DT * STEP_SIZE)
+        temp_df = pd.DataFrame(
+            {"r": bin_edges, "H_mean": hist, "H_lo": hist_lo, "H_hi": hist_hi}
+        )
+
+        temp_df.to_csv(
+            f"./roughness-{int(timestep.time*DT*STEP_SIZE)}.csv", index=False
+        )
+
         fig, ax = plt.subplots()
-            
+
         ax.plot(bin_edges, hist)
         ax.fill_between(bin_edges, hist_lo, hist_hi, alpha=0.6)
-        ax.plot(bin_edges, roughness_func(rs=bin_edges,alpha=alpha, xi=xi, w=width), color="black", linestyle="dashed")
+        ax.plot(
+            bin_edges,
+            roughness_func(rs=bin_edges, alpha=alpha, xi=xi, w=width),
+            color="black",
+            linestyle="dashed",
+        )
         ax.set_xlim(0, 2100)
         ax.set_xlabel("Separation")
         ax.set_ylim(0, 150)
@@ -523,7 +543,7 @@ def main():
         ax.set_title(f"Xi = {xi:.2f}, alpha = {alpha:.2f}, w = {width:.2f}")
         fig.savefig(f"./roughness-{int(timestep.time*DT*STEP_SIZE)}.pdf")
         plt.close(fig)
-        
+
         terminals = universe.select_atoms("type 2 or type 3")
         terminal_pairs = find_lj_pairs(
             terminals.positions, terminals.ids, LJ_BOND, cell=periodic_box[:2, :]
@@ -534,7 +554,9 @@ def main():
         if not bond_trajectory:
             bond_trajectory = [frozenset(broken_bonds_step)]
         else:
-            bond_trajectory.append(frozenset(bond_trajectory[-1].union(broken_bonds_step)))
+            bond_trajectory.append(
+                frozenset(bond_trajectory[-1].union(broken_bonds_step))
+            )
 
         # Now remove those edges from the in_graph
         total_graph.remove_edges_from([(u, v) for u, v in bond_trajectory[-1]])
@@ -595,15 +617,15 @@ def main():
 
     coeffs_df = pd.DataFrame(coeffs_dict)
     coeffs_df.to_csv(f"{output_prefix}_roughness_parameters.csv", index=False)
-    
-    output_files.flush()
-    #existence_matrix, ring_sizes = calculate_existence_matrix(
-    #    ring_trajectory, graph_trajectory, atoms
-    #)
 
-    #births, deaths = [], []
-    #lifespans = defaultdict(list)
-    #for i in range(existence_matrix.shape[0]):
+    output_files.flush()
+    # existence_matrix, ring_sizes = calculate_existence_matrix(
+    #    ring_trajectory, graph_trajectory, atoms
+    # )
+
+    # births, deaths = [], []
+    # lifespans = defaultdict(list)
+    # for i in range(existence_matrix.shape[0]):
     #    is_true = np.where(existence_matrix[i, :])[0]
     #    births.append(np.min(is_true) * STEP_SIZE * DT * 1e-3)
     #    deaths.append(np.max(is_true) * STEP_SIZE * DT * 1e-3)
@@ -611,43 +633,44 @@ def main():
     #        np.sum(is_true) * STEP_SIZE * DT * 1e-3
     #    )
 
-    #fig, ax = plt.subplots()
-    #divider = make_axes_locatable(ax)
-    #cax = divider.append_axes("right", size="5%", pad=0.05)
-    #cmapper = cm.ScalarMappable(
+    # fig, ax = plt.subplots()
+    # divider = make_axes_locatable(ax)
+    # cax = divider.append_axes("right", size="5%", pad=0.05)
+    # cmapper = cm.ScalarMappable(
     #    norm=colors.Normalize(vmin=3, vmax=10, clip=True), cmap="coolwarm"
-    #)
-    #ax.scatter(births, deaths, c=cmapper.to_rgba(ring_sizes))
-    #ax.plot([0, 0], [110, 110], linestyle="dotted", color="black")
-    #ax.axvline(100.0, linestyle="dotted", color="black")
-    #ax.axhline(100.0, linestyle="dotted", color="black")
-    #ax.set_xlim(0, 110)
-    #ax.set_ylim(0, 110)
-    #cbar = fig.colorbar(cmapper, cax=cax)
-    #cbar.ax.set_ylabel("Ring Size", rotation=270)
-    #ax.set_xlabel("Birth / microsecond")
-    #ax.set_ylabel("Death / microsecond")
-    #fig.savefig("birth-death.pdf")
-    #plt.close(fig)
+    # )
+    # ax.scatter(births, deaths, c=cmapper.to_rgba(ring_sizes))
+    # ax.plot([0, 0], [110, 110], linestyle="dotted", color="black")
+    # ax.axvline(100.0, linestyle="dotted", color="black")
+    # ax.axhline(100.0, linestyle="dotted", color="black")
+    # ax.set_xlim(0, 110)
+    # ax.set_ylim(0, 110)
+    # cbar = fig.colorbar(cmapper, cax=cax)
+    # cbar.ax.set_ylabel("Ring Size", rotation=270)
+    # ax.set_xlabel("Birth / microsecond")
+    # ax.set_ylabel("Death / microsecond")
+    # fig.savefig("birth-death.pdf")
+    # plt.close(fig)
 
-    #ring_size_list = list(range(min(lifespans.keys()), max(lifespans.keys())))
-    #fig, ax = plt.subplots()
-    #mean_lifespans = [np.nanmean(lifespans[ring_size]) for ring_size in ring_size_list]
-    #std_lifespans = [
+    # ring_size_list = list(range(min(lifespans.keys()), max(lifespans.keys())))
+    # fig, ax = plt.subplots()
+    # mean_lifespans = [np.nanmean(lifespans[ring_size]) for ring_size in ring_size_list]
+    # std_lifespans = [
     #    np.nanstd(lifespans[ring_size], ddof=1) for ring_size in ring_size_list
-    #]
-    #ax.errorbar(ring_size_list, mean_lifespans, std_lifespans)
-    #ax.set_ylabel("Lifespan / microsecond")
-    #ax.set_xlabel("Ring Size")
-    #ax.set_ylim(0, np.nanmax(mean_lifespans)+np.nanmax(std_lifespans))
-    #ax.set_xlim(0, np.max(ring_size_list))
-    #fig.savefig("./lifespan.pdf")
-    #plt.close(fig)
+    # ]
+    # ax.errorbar(ring_size_list, mean_lifespans, std_lifespans)
+    # ax.set_ylabel("Lifespan / microsecond")
+    # ax.set_xlabel("Ring Size")
+    # ax.set_ylim(0, np.nanmax(mean_lifespans)+np.nanmax(std_lifespans))
+    # ax.set_xlim(0, np.max(ring_size_list))
+    # fig.savefig("./lifespan.pdf")
+    # plt.close(fig)
 
-    #fig, ax = plt.subplots()
-    #plot_lifetimes(existence_matrix, ring_sizes, fig=fig, ax=ax)
-    #fig.savefig("lifetimes.pdf")
-    #plt.close(fig)
+    # fig, ax = plt.subplots()
+    # plot_lifetimes(existence_matrix, ring_sizes, fig=fig, ax=ax)
+    # fig.savefig("lifetimes.pdf")
+    # plt.close(fig)
+
 
 if __name__ == "__main__":
     main()

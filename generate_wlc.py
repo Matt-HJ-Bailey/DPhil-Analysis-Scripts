@@ -152,8 +152,7 @@ def scale_rotate_to_fit(
         )
         for poly_idx, other_poly_idx in np.argwhere(collider_list):
             does_collide = polymer_collection[poly_idx].collides_with(
-                polymer_collection[other_poly_idx],
-                periodic_box=periodic_box,
+                polymer_collection[other_poly_idx], periodic_box=periodic_box,
             )
             if does_collide:
                 # Two are colliding. Randomly rotate one of them by a small amount.

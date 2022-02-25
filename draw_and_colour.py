@@ -10,13 +10,16 @@ from collections import defaultdict
 from typing import Dict, Optional
 import networkx as nx
 import numpy as np
-
+import matplotlib.cm as cm
+import copy
 import matplotlib.pyplot as plt
 
-UNKNOWN_COLOUR = (2, 3)
+UNKNOWN_COLOUR = (2,)
 COLOUR_TO_TYPE = defaultdict(lambda: UNKNOWN_COLOUR)
 COLOUR_TO_TYPE[0] = (2,)
 COLOUR_TO_TYPE[1] = (3,)
+COLOUR_TO_TYPE[2] = (4,)
+COLOUR_TO_TYPE[3] = (5,)
 CORRESPONDING_COLOURS = {2: 3, 3: 2, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8}
 COLOUR_LUT = {
     None: "blue",
@@ -194,21 +197,46 @@ def draw_periodic_coloured(
     graph.remove_nodes_from(temporary_nodes)
     return ax
 
-def to_tikz(filename: str, graph, rings=None, cmap: str="coolwarm", periodic_box=None,vmin=None, vmax=None, scale=10):
+def map_periodic_ring(ring, periodic_box):
+    coords = ring.coords
+    minimum_image_x = (periodic_box[0, 1] - periodic_box[0, 0]) / 2
+    minimum_image_y = (periodic_box[1, 1] - periodic_box[1, 0]) / 2
+    
+    centre = coords[np.argmin(coords[:, 0] - (minimum_image_x + periodic_box[0, 0]))]
+    xs, ys = coords[:, 0], coords[:, 1]
+    xs[(xs - centre[0]) < -minimum_image_x] += 2 * minimum_image_x
+    ys[(ys - centre[1]) < -minimum_image_y] += 2 * minimum_image_y
+    
+    xs[(xs - centre[0]) > minimum_image_x] -= 2 * minimum_image_x
+    ys[(ys - centre[1]) > minimum_image_y] -= 2 * minimum_image_y
+    
+    return np.array([xs, ys]).T
+    
+def to_tikz(filename: str, graph, rings=None, cmap: str="coolwarm", periodic_box=None,vmin=None, vmax=None, scale=10, pos=None, color_lut=None, color_data=None):
 
-    pos = nx.get_node_attributes(graph, "pos")
+    if pos is None:
+        pos = nx.get_node_attributes(graph, "pos")
 
+    # If we're in a periodic box, we have to apply the
+    # minimum image convention. Do this by creating
+    # a virtual position for v, which is a box length away.
+    minimum_image_x = (periodic_box[0, 1] - periodic_box[0, 0]) / 2
+    minimum_image_y = (periodic_box[1, 1] - periodic_box[1, 0]) / 2
+        
     edge_list = []
     periodic_edge_list = []
     for u, v in graph.edges():
-        distance = np.abs(pos[v] - pos[u])
-        if (
-            distance[0] < periodic_box[0, 1] / 2
-            and distance[1] < periodic_box[1, 1] / 2
-        ):
-            edge_list.append((u, v))
-        else:
+        distance = pos[v] - pos[u]
+        if distance[0] < -minimum_image_x:
             periodic_edge_list.append((u, v))
+        elif distance[0] > minimum_image_x:
+            periodic_edge_list.append((u, v))
+        elif distance[1] < -minimum_image_y:
+            periodic_edge_list.append((u, v))
+        elif distance[1] > minimum_image_y:
+            periodic_edge_list.append((u, v))
+        else:
+            edge_list.append((u, v))
     nodes_in_edge_list = set([item for edge_pair in edge_list for item in edge_pair])
     nodes_in_edge_list = list(nodes_in_edge_list)
 
@@ -217,9 +245,7 @@ def to_tikz(filename: str, graph, rings=None, cmap: str="coolwarm", periodic_box
     )
     periodic_nodes = list(periodic_nodes)
     
-    brewer_lut = {(1,): "brewer1", (2,): "brewer2", (3,): "brewer3"}
-    node_colours = {node_id: brewer_lut[colour] for node_id, colour in graph.nodes(data="color")
-        }
+    node_colours = {node_id: colour[0] for node_id, colour in graph.nodes(data="color")}
 
     node_colours_list = []
     new_edge_list = []
@@ -234,11 +260,7 @@ def to_tikz(filename: str, graph, rings=None, cmap: str="coolwarm", periodic_box
     for u, v in periodic_edge_list:
         gradient = new_pos[v] - new_pos[u]
 
-        # If we're in a periodic box, we have to apply the
-        # minimum image convention. Do this by creating
-        # a virtual position for v, which is a box length away.
-        minimum_image_x = (periodic_box[0, 1] - periodic_box[0, 0]) / 2
-        minimum_image_y = (periodic_box[1, 1] - periodic_box[1, 0]) / 2
+        
         # print(pos[v], pos[u])
         # print(gradient, minimum_image_x, minimum_image_y)
         # We need the += and -= to cope with cases where we're out in
@@ -260,49 +282,60 @@ def to_tikz(filename: str, graph, rings=None, cmap: str="coolwarm", periodic_box
         node_colours[new_v] = node_colours[v]
         new_edge_list.append((u, new_v))
         new_node_list.extend([u, new_v])
-        temporary_edges.append((u, new_v))
-        temporary_nodes.append(new_v)
+        #temporary_edges.append((u, new_v))
+        #temporary_nodes.append(new_v)
         
     
     for key, val in new_pos.items():
-        new_pos[key] = scale*val[0] / (periodic_box[0, 1] - periodic_box[0, 0]), scale*val[1] / (periodic_box[1, 1] - periodic_box[1, 0])
+        new_pos[key] = np.array([scale*val[0] / (periodic_box[0, 1] - periodic_box[0, 0]), scale*val[1] / (periodic_box[1, 1] - periodic_box[1, 0])])
         
     with open(filename, "w") as fi:
-        fi.write(r"\begin{tikzpicture}" + "\n")
+        fi.write(r"""\begin{tikzpicture}[
+    netmcnode1/.style={circle, draw=black, thin, inner sep=0pt,minimum size=4pt, fill=brewer1},
+    netmcnode2/.style={circle, draw=black, thin, inner sep=0pt,minimum size=4pt, fill=brewer2},
+    netmcnode3/.style={circle, draw=black, thin, inner sep=0pt,minimum size=4pt, fill=brewer3},
+    netmcnode4/.style={circle, draw=black, thin, inner sep=0pt,minimum size=4pt, fill=brewer4},]""" + "\n")
         
         if rings is not None:
-            color_data = [len(ring) for ring in rings]
-        
+            if color_data is None:
+                color_data = [len(ring) for ring in rings]
+                
             if vmin is None:
                 vmin = min(color_data)
             if vmax is None:
                 vmax = max(color_data)
-            color_lut = int(vmax - vmin)
+            if color_lut is None:
+                color_lut = int(vmax - vmin)
+                
+            color_data = [int( color_lut * (item - vmin) / (vmax - vmin)) for item in color_data]
+            
             colors = cm.get_cmap(cmap)(np.linspace(0, 1, color_lut))
             for idx, color in enumerate(colors):
-                fi.write("\definecolor{" + f"{cmap}{vmax-vmin}v{i}" "}{RGB}{" + f"{int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}" + "}\n")
+                fi.write("\definecolor{" + f"{cmap}{vmax-vmin}v{idx}" "}{RGB}{" + f"{int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}" + "}\n")
                 
-            for ring in self.current_rings:
-                color_idx = min(vmax - vmin, len(ring) - vmin)
-                
-                for node in ring.to_node_list:
-                    fi.write(r"\draw [thick, black, fill=" + f"{cmap}{vmax-vmin}v{i}] ")
-                    for node in ring.to_node_list():
-                        pos = pos_dict[node]
-                        fi.write(f"({new_pos[0]:.2f}, {new_pos[1]:.2f}) -- ")
-                    fi.write("cycle;\n")
+            for j, ring in enumerate(rings):
+                color_idx = color_data[j]               
+                fi.write(r"\fill [" + f"{cmap}{vmax-vmin}v{color_idx}] ")
+                coords = map_periodic_ring(ring, periodic_box)
+                coords[:, 0] *= scale / (periodic_box[0, 1] - periodic_box[0, 0])
+                coords[:, 1] *= scale / (periodic_box[1, 1] - periodic_box[1, 0])
+                for coord in coords:
+                    fi.write(f"({coord[0]:.2f}, {coord[1]:.2f}) -- ")
+                fi.write("cycle;\n")
         
         for u, v in edge_list:
+            if (u, v) in periodic_edge_list or (v, u) in periodic_edge_list:
+                continue
             fi.write(r"\draw[thick, black] " +f"({new_pos[u][0]}, {new_pos[u][1]}) -- ({new_pos[v][0]}, {new_pos[v][1]});\n")
         
-        for u, v in temporary_edges:
+        for u, v in new_edge_list:
             fi.write(r"\draw[thick, black, dotted] " +f"({new_pos[u][0]}, {new_pos[u][1]}) -- ({new_pos[v][0]}, {new_pos[v][1]});\n")
         
         for node in graph.nodes:
-            fi.write(r"\node [circle, draw=black, thin, inner sep=0pt, fill=" + f"{node_colours[node]}" + ", minimum size=4pt] " + f"(node{node}) at ({new_pos[node][0]}, {new_pos[node][1]})" + "{};\n")
+            fi.write(r"\node [ " + f"netmcnode{node_colours[node]}" + "] " + f"(node{node}) at ({new_pos[node][0]}, {new_pos[node][1]})" + "{};\n")
         
-        for node in temporary_nodes:
-            fi.write(r"\node [circle, draw=black, thin, inner sep=0pt, fill=" + f"{node_colours[node]}" + ", minimum size=4pt] " + f"(node{node}) at ({new_pos[node][0]}, {new_pos[node][1]})" + "{};\n")
+        for node in new_node_list:
+            fi.write(r"\node [ " + f"netmcnode{node_colours[node]}" + "] " + f"(node{node}) at ({new_pos[node][0]}, {new_pos[node][1]})" + "{};\n")
         fi.write(r"\end{tikzpicture}")
 
 def draw_nonperiodic_coloured(graph: nx.Graph, pos: Dict[int, np.array], ax=None):

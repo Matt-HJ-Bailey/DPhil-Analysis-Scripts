@@ -1,6 +1,8 @@
 """
 Author: David Ormrod Morley
+Author: Matt Bailey
 """
+import argparse
 
 import numpy as np
 from scipy.optimize import root
@@ -98,7 +100,7 @@ class NodeME:
         else:
             return np.array(self.pk)[:, self.k == k]
 
-    def get_variance(self) -> np.array:
+    def get_variance(self) -> np.ndarray:
         """
         Get variance of node distributions.
 
@@ -107,7 +109,7 @@ class NodeME:
 
         return np.array(self.k_var)
 
-    def get_entropy(self) -> np.array:
+    def get_entropy(self) -> np.ndarray:
         """
         Get entropy of node distributions.
 
@@ -234,6 +236,24 @@ def calculate_pk(x: float, y: float, net: NodeME, tol: float = -20) -> np.array:
 
 if __name__ == "__main__":
 
-    me = NodeME(k_mean=6, k_limits=(3, 20))
-    me.scan()
-    me.plot_pk_variance(k=4)
+    parser = argparse.ArgumentParser(
+        description="Generate the maximum entropy distribution for a given pk. Requires you to specify both k (the mean ring size) and pk (the mean number of rings with k=mean k)."
+    )
+    parser.add_argument("k", type=int, help="The mean value of k in the distribution")
+    parser.add_argument(
+        "pk", type=float, help="The fraction of all entries with given k"
+    )
+
+    parser.add_argument(
+        "--klow", type=int, help="Minimum acceptable value of k", default=3
+    )
+    parser.add_argument(
+        "--khigh", type=int, help="Maximum acceptable value of k", default=20
+    )
+    args = parser.parse_args()
+
+    me = NodeME(k_mean=args.k, k_limits=(args.klow, args.khigh))
+    pk = me(args.pk, k=args.k)
+
+    for k_val, pk_val in zip(me.k, pk):
+        print(f"{k_val}, {pk_val}")
